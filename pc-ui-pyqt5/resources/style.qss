@@ -1,0 +1,268 @@
+/* ═══════════════════════════════════════════════════════
+   Audio DSP Configuration — Dark Theme
+   ═══════════════════════════════════════════════════════ */
+
+QWidget {
+    background-color: #12121e;
+    color: #dde3ee;
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 13px;
+}
+
+/* ── Group Boxes ──────────────────────────────────────── */
+QGroupBox {
+    border: 1px solid #1e3a5c;
+    border-radius: 5px;
+    margin-top: 8px;
+    padding-top: 10px;
+    font-weight: bold;
+    font-size: 11px;
+    color: #4FC3F7;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 6px;
+    color: #4FC3F7;
+}
+
+/* ── Buttons ──────────────────────────────────────────── */
+QPushButton {
+    background-color: #162033;
+    border: 1px solid #2e5f8a;
+    border-radius: 4px;
+    padding: 6px 14px;
+    color: #b0c4de;
+    font-weight: bold;
+    font-size: 12px;
+    min-height: 26px;
+}
+QPushButton:hover {
+    background-color: #1e3a5c;
+    border-color: #4FC3F7;
+    color: #4FC3F7;
+}
+QPushButton:pressed {
+    background-color: #0f2540;
+}
+QPushButton:disabled {
+    background-color: #1a1a2a;
+    border-color: #2a2a3a;
+    color: #3a3a5a;
+}
+
+QPushButton#connectBtn {
+    background-color: #1b3d1f;
+    border-color: #4CAF50;
+    color: #4CAF50;
+}
+QPushButton#connectBtn:hover {
+    background-color: #2e7d32;
+    color: #ffffff;
+}
+
+QPushButton#disconnectBtn {
+    background-color: #3d1b1b;
+    border-color: #e53935;
+    color: #ef9a9a;
+}
+QPushButton#disconnectBtn:hover {
+    background-color: #c62828;
+    color: #ffffff;
+}
+
+QPushButton#actionBtn {
+    background-color: #162033;
+    border-color: #4FC3F7;
+    color: #4FC3F7;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+}
+QPushButton#actionBtn:hover {
+    background-color: #1565c0;
+    color: #ffffff;
+}
+
+QPushButton#applyBtn {
+    background-color: #1b3d1f;
+    border-color: #4CAF50;
+    color: #4CAF50;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+}
+QPushButton#applyBtn:hover {
+    background-color: #2e7d32;
+    color: #ffffff;
+}
+
+QPushButton#fileBtn {
+    background-color: #14203a;
+    border: 1px solid #1e3a5c;
+    color: #7090b0;
+    font-weight: normal;
+    font-size: 12px;
+}
+QPushButton#fileBtn:hover {
+    background-color: #1e3a5c;
+    border-color: #4FC3F7;
+    color: #4FC3F7;
+}
+
+/* ── Toggle Switch ────────────────────────────────────── */
+QPushButton#toggleSwitch {
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: bold;
+    min-width: 100px;
+    max-width: 100px;
+    min-height: 24px;
+    max-height: 24px;
+    padding: 0;
+    background-color: #1e1e30;
+    border: 1px solid #333355;
+    color: #555577;
+}
+QPushButton#toggleSwitch:checked {
+    background-color: #1b3d1f;
+    border-color: #4CAF50;
+    color: #4CAF50;
+}
+QPushButton#toggleSwitch:hover {
+    border-color: #4FC3F7;
+}
+
+/* ── Tab Bar (Mode Selector) ──────────────────────────── */
+QTabBar {
+    background: transparent;
+}
+QTabBar::tab {
+    background-color: #162033;
+    border: 1px solid #1e3a5c;
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    padding: 5px 18px;
+    color: #557090;
+    font-weight: bold;
+    font-size: 12px;
+    margin-right: 2px;
+}
+QTabBar::tab:selected {
+    background-color: #1e3a5c;
+    border-color: #4FC3F7;
+    color: #4FC3F7;
+}
+QTabBar::tab:hover:!selected {
+    background-color: #1a2d44;
+    color: #7ab0d0;
+}
+
+/* ── Inputs ───────────────────────────────────────────── */
+QLineEdit {
+    background-color: #0e1828;
+    border: 1px solid #1e3a5c;
+    border-radius: 4px;
+    padding: 5px 8px;
+    color: #dde3ee;
+    selection-background-color: #1565c0;
+}
+QLineEdit:focus {
+    border-color: #4FC3F7;
+}
+
+QComboBox {
+    background-color: #0e1828;
+    border: 1px solid #1e3a5c;
+    border-radius: 4px;
+    padding: 4px 8px;
+    color: #dde3ee;
+    min-width: 100px;
+}
+QComboBox:hover {
+    border-color: #4FC3F7;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+QComboBox QAbstractItemView {
+    background-color: #0e1828;
+    color: #dde3ee;
+    selection-background-color: #1565c0;
+    border: 1px solid #1e3a5c;
+    outline: none;
+}
+
+/* ── Sliders ──────────────────────────────────────────── */
+QSlider::groove:horizontal {
+    height: 6px;
+    background: #1e3a5c;
+    border-radius: 3px;
+}
+QSlider::handle:horizontal {
+    background: #4FC3F7;
+    width: 16px;
+    height: 16px;
+    margin: -5px 0;
+    border-radius: 8px;
+    border: 2px solid #0e1828;
+}
+QSlider::handle:horizontal:hover {
+    background: #81d4fa;
+}
+QSlider::sub-page:horizontal {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #1565c0, stop:1 #4FC3F7);
+    border-radius: 3px;
+}
+
+/* ── SpinBox ──────────────────────────────────────────── */
+QSpinBox {
+    background-color: #0e1828;
+    border: 1px solid #1e3a5c;
+    border-radius: 4px;
+    padding: 4px 6px;
+    color: #dde3ee;
+}
+QSpinBox:hover { border-color: #4FC3F7; }
+QSpinBox::up-button, QSpinBox::down-button {
+    background-color: #162033;
+    border: none;
+    width: 18px;
+}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+    background-color: #1e3a5c;
+}
+
+/* ── Labels ───────────────────────────────────────────── */
+QLabel { color: #dde3ee; }
+QFormLayout QLabel { color: #7090b0; font-size: 12px; }
+
+/* ── Scroll Bars ──────────────────────────────────────── */
+QScrollBar:vertical {
+    background: #0e1828;
+    width: 10px;
+    border-radius: 5px;
+}
+QScrollBar::handle:vertical {
+    background: #1e3a5c;
+    border-radius: 4px;
+    min-height: 24px;
+}
+QScrollBar::handle:vertical:hover { background: #4FC3F7; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+
+QScrollBar:horizontal {
+    background: #0e1828;
+    height: 10px;
+    border-radius: 5px;
+}
+QScrollBar::handle:horizontal {
+    background: #1e3a5c;
+    border-radius: 4px;
+    min-width: 24px;
+}
+QScrollBar::handle:horizontal:hover { background: #4FC3F7; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+
+/* ── Scroll Area ──────────────────────────────────────── */
+QScrollArea { border: none; background: transparent; }

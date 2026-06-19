@@ -1,0 +1,4 @@
+PyQt5>=5.15.0
+
+# Build dependencies (for creating standalone EXE)
+pyinstaller>=5.0

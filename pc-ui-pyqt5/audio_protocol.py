@@ -544,6 +544,28 @@ def build_full_upload(mode_params: List[List[int]], version: int = 1) -> bytes:
     return header + mode_data + struct.pack("B", checksum)
 
 
+def validate_params(modes: List[List[int]]) -> None:
+    """Validate all 6×15 raw parameter values against defined min/max bounds.
+
+    Raises ValueError listing every out-of-range value found.
+    Call this after parse_config_file() to catch corrupt/legacy files early.
+    """
+    errors = []
+    for mode_idx, mode in enumerate(modes):
+        for param_idx, val in enumerate(mode):
+            if param_idx >= len(PARAM_DEFS):
+                continue
+            p = PARAM_DEFS[param_idx]
+            if not (p.min_raw <= val <= p.max_raw):
+                errors.append(
+                    f"Mode {mode_idx} ({MODE_SETS[mode_idx]}) "
+                    f"param {param_idx} ({p.name}): "
+                    f"value {val} out of range [{p.min_raw}, {p.max_raw}]"
+                )
+    if errors:
+        raise ValueError("Parameter validation failed:\n" + "\n".join(errors))
+
+
 def parse_full_download(data: bytes) -> Tuple[List[List[int]], int]:
     """Parse full download packet containing all modes.
     

@@ -1,32 +1,55 @@
 """
 TCP Client for Audio DSP Configuration.
-Handles non-blocking socket communication with the DSP device.
-Uses QTimer for async reads since PyQt sockets are not natively async.
+Non-blocking socket with:
+ - OS-level TCP keep-alive to detect silent drops
+ - getpeername() verification before emitting connected()
+ - Exponential-backoff auto-reconnect (user disconnect cancels retries)
 """
 
 import socket
-from PyQt5.QtCore import QObject, pyqtSignal, QTimer, QIODevice
+import select
+from PyQt5.QtCore import QObject, pyqtSignal, QTimer
+
+
+_INITIAL_RETRY_DELAY_MS = 1_000   # 1 s
+_MAX_RETRY_DELAY_MS     = 30_000  # 30 s
+_POLL_INTERVAL_MS       = 50      # 50 ms poll
 
 
 class TCPClient(QObject):
-    """Non-blocking TCP client for the Audio DSP protocol."""
-
-    connected = pyqtSignal()
+    connected    = pyqtSignal()
     disconnected = pyqtSignal()
     data_received = pyqtSignal(bytes)
-    error = pyqtSignal(str)
+    error        = pyqtSignal(str)
+    reconnecting = pyqtSignal(int, int)   # (attempt_number, delay_seconds)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.socket = None
-        self.timer = QTimer(self)
-        self.timer.setSingleShot(False)
-        self.timer.timeout.connect(self._on_timer)
+        self.socket: socket.socket | None = None
         self.buffer = bytearray()
-        # Default connection parameters
+
         self._host = "192.168.1.100"
         self._port = 5558
-        self._is_connected = False
+        self._is_connected  = False
+        self._connecting    = False   # SYN_SENT phase
+        self._user_stopped  = False   # True after explicit disconnect()
+        self._retry_count   = 0
+        self._retry_delay_ms = _INITIAL_RETRY_DELAY_MS
+
+        # Poll timer: runs every 50 ms while socket exists
+        self._poll = QTimer(self)
+        self._poll.setSingleShot(False)
+        self._poll.timeout.connect(self._on_timer)
+
+        # Retry timer: fires once after backoff delay
+        self._retry = QTimer(self)
+        self._retry.setSingleShot(True)
+        self._retry.timeout.connect(self._do_retry)
+
+        # Backwards-compat alias used by legacy call-sites
+        self.timer = self._poll
+
+    # ── Public API ────────────────────────────────────────────────
 
     @property
     def is_connected(self) -> bool:
@@ -37,137 +60,167 @@ class TCPClient(QObject):
         return self._host
 
     @host.setter
-    def host(self, value: str):
-        self._host = value
+    def host(self, v: str):
+        self._host = v
 
     @property
     def port(self) -> int:
         return self._port
 
     @port.setter
-    def port(self, value: int):
-        self._port = value
+    def port(self, v: int):
+        self._port = v
 
     def connect(self, host: str = None, port: int = None) -> bool:
-        """Connect to the DSP device.
-        
-        Args:
-            host: IP address (defaults to _host property)
-            port: Port number (defaults to _port property, 5558)
-        
-        Returns:
-            True if connection started successfully
-        """
-        host = host or self._host
-        port = port or self._port
-
-        # Close existing connection if any
-        if self.socket:
-            self._disconnect_internal()
-
-        try:
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.setblocking(False)
-            self.socket.connect_ex((host, port))
-            
-            self._is_connected = True
+        """Start connection (user-initiated). Resets retry state."""
+        if host:
             self._host = host
+        if port:
             self._port = port
-            
-            # Start polling for data
-            self.timer.start(50)  # Check every 50ms
-            
-            self.connected.emit()
-            return True
-        except Exception as e:
-            self._is_connected = False
-            if self.socket:
-                self.socket.close()
-                self.socket = None
-            self.error.emit(f"Connection failed: {e}")
-            return False
+        self._user_stopped   = False
+        self._retry_count    = 0
+        self._retry_delay_ms = _INITIAL_RETRY_DELAY_MS
+        self._retry.stop()
+        return self._do_connect()
 
     def disconnect(self) -> bool:
-        """Disconnect from the DSP device."""
+        """User-initiated disconnect — cancels auto-reconnect."""
+        self._user_stopped = True
+        self._retry.stop()
+        was_connected = self._is_connected or self._connecting
         self._disconnect_internal()
+        if was_connected:
+            self.disconnected.emit()
         return True
 
     def send(self, data: bytes) -> bool:
-        """Send data to the DSP device.
-        
-        Args:
-            data: Bytes to send
-        
-        Returns:
-            True if data was sent successfully
-        """
         if not self.socket or not self._is_connected:
             self.error.emit("Not connected")
             return False
-
         try:
             self.socket.sendall(data)
             return True
         except Exception as e:
-            self._is_connected = False
             self.error.emit(f"Send failed: {e}")
+            self._disconnect_internal()
+            self.disconnected.emit()
+            self._schedule_retry()
             return False
 
-    def send_command(self, cmd_bytes: bytes) -> bool:
-        """Send a command byte to the DSP.
-        
-        Args:
-            cmd_bytes: Command bytes (e.g., bytes([0x01]) for STATUS)
-        
-        Returns:
-            True if command was sent
-        """
-        return self.send(cmd_bytes)
+    def send_command(self, cmd: bytes) -> bool:
+        return self.send(cmd)
+
+    def cleanup(self):
+        self.disconnect()
+
+    # ── Internal ─────────────────────────────────────────────────
+
+    def _do_connect(self) -> bool:
+        self._disconnect_internal()
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setblocking(False)
+            # OS-level keep-alive so silent drops are detected
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            err = sock.connect_ex((self._host, self._port))
+            # WSAEWOULDBLOCK (10035 Win) or EINPROGRESS (115 Linux) → still connecting
+            if err not in (0, 10035, 115):
+                sock.close()
+                raise OSError(err, f"connect_ex returned {err}")
+            self.socket     = sock
+            self._connecting = True
+            self._is_connected = False
+            self._poll.start(_POLL_INTERVAL_MS)
+            return True
+        except Exception as e:
+            self._connecting = False
+            self.error.emit(f"Connection failed: {e}")
+            return False
+
+    def _do_retry(self):
+        if self._user_stopped:
+            return
+        self._retry_count += 1
+        self.reconnecting.emit(self._retry_count, self._retry_delay_ms // 1000)
+        self._do_connect()
+
+    def _schedule_retry(self):
+        if self._user_stopped:
+            return
+        self._retry.start(self._retry_delay_ms)
+        self._retry_delay_ms = min(self._retry_delay_ms * 2, _MAX_RETRY_DELAY_MS)
 
     def _on_timer(self):
-        """Called periodically to check for incoming data."""
-        if not self.socket or not self._is_connected:
-            self.timer.stop()
+        if not self.socket:
+            self._poll.stop()
+            return
+
+        # ── Phase 1: waiting for SYN-ACK ──
+        if self._connecting:
+            try:
+                self.socket.getpeername()
+                # Connected!
+                self._connecting     = False
+                self._is_connected   = True
+                self._retry_count    = 0
+                self._retry_delay_ms = _INITIAL_RETRY_DELAY_MS
+                self.connected.emit()
+            except OSError:
+                # Check for definitive failure via select
+                _, writable, exceptional = select.select(
+                    [], [self.socket], [self.socket], 0
+                )
+                if exceptional:
+                    self._connecting = False
+                    err_code = self.socket.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                    self._disconnect_internal()
+                    self.error.emit(f"Connection refused (err {err_code})")
+                    self._schedule_retry()
+            return
+
+        # ── Phase 2: normal receive ──
+        if not self._is_connected:
+            self._poll.stop()
             return
 
         try:
             data = self.socket.recv(4096)
             if data:
                 self.buffer.extend(data)
-                # Process complete packets
                 self._process_buffer()
             else:
-                # Connection closed by remote
+                # Graceful close by remote
                 self._is_connected = False
                 self.disconnected.emit()
-                self.timer.stop()
+                self._poll.stop()
                 self._disconnect_internal()
+                self._schedule_retry()
         except ConnectionResetError:
             self._is_connected = False
-            self.error.emit("Connection reset")
+            self.error.emit("Connection reset by device")
             self.disconnected.emit()
-            self.timer.stop()
+            self._poll.stop()
             self._disconnect_internal()
+            self._schedule_retry()
         except BlockingIOError:
-            # No data available yet
-            pass
+            pass  # no data yet
         except Exception as e:
             self._is_connected = False
             self.error.emit(f"Receive error: {e}")
-            self.timer.stop()
+            self._poll.stop()
             self._disconnect_internal()
+            self._schedule_retry()
 
     def _process_buffer(self):
-        """Process available buffer data and emit packets."""
-        if len(self.buffer) > 0:
+        if self.buffer:
             data = bytes(self.buffer)
             self.buffer.clear()
             self.data_received.emit(data)
 
     def _disconnect_internal(self):
-        """Internal disconnect without emitting signals."""
         self._is_connected = False
-        self.timer.stop()
+        self._connecting   = False
+        self._poll.stop()
         self.buffer.clear()
         if self.socket:
             try:
@@ -175,7 +228,3 @@ class TCPClient(QObject):
             except Exception:
                 pass
             self.socket = None
-
-    def cleanup(self):
-        """Clean up resources."""
-        self.disconnect()

@@ -1,0 +1,18 @@
+# Compiled binaries
+a.exe
+audio_dsp_server.exe
+
+# Runtime data
+audio_flash.bin
+
+# Temporary test output logs
+test_out*.txt
+test_err*.txt
+build_test_stdout.txt
+build_test_stderr.txt
+
+# Object files
+*.o
+
+# Claude local settings
+.claude/

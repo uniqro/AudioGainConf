@@ -343,9 +343,10 @@ class AudioDSPConfigApp(QMainWindow):
                     self._start_watchdog()
 
         elif pending == "VERIFY":
-            if len(self._response_buffer) >= 9:
+            if len(self._response_buffer) >= 12:
                 buf = bytes(self._response_buffer)
-                match = buf[8] if len(buf) > 8 else 0
+                # Header is [cmd|0x80][status][error], so data[8] = buf[11]
+                match = buf[11] if len(buf) > 11 else 0
                 if buf[1] == 0 and match:
                     self._set_status("VERIFY: CRC32 OK ✓", ok=True)
                 else:

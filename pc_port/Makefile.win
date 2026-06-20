@@ -1,0 +1,57 @@
+# ============================================================
+#  Makefile.win — Windows / MinGW-w64 build
+#
+#  Prerequisites: MinGW-w64 (gcc available in PATH)
+#
+#  Usage:
+#    mingw32-make -f Makefile.win          # build
+#    mingw32-make -f Makefile.win clean    # clean
+#    mingw32-make -f Makefile.win run      # build + run
+#
+#  Run from the AudioDspConfig\ root directory:
+#    cd d:\PlatformTolg\AudioDspConfig
+#    mingw32-make -f pc_port\Makefile.win
+# ============================================================
+
+CC      = gcc
+TARGET  = audio_dsp_server.exe
+FLASH   = audio_flash.bin
+
+CFLAGS  = -Wall -Wextra \
+          -Wno-int-conversion \
+          -Wno-unused-parameter \
+          -include pc_port/include/vxWorks.h \
+          -I pc_port/include \
+          -I . \
+          -D_WIN32_WINNT=0x0601
+
+LDFLAGS = -lws2_32 -lpthread
+
+SRCS = AudioConf/AudioConf.c \
+       AudioConf/AudioConfigTask.c \
+       AudioConf/AudioConfigHandler.c \
+       AudioConf/AudioParamDef.c \
+       AudioConf/AudioSpiGateway.c \
+       AudioConf/AudioFlashMgr.c \
+       pc_port/src/tasklib_stubs.c \
+       pc_port/src/flash_stubs.c \
+       pc_port/src/spi_stubs.c \
+       pc_port/src/dispatch_glue.c \
+       pc_port/main.c
+
+OBJS = $(SRCS:.c=.o)
+
+.PHONY: all clean run
+
+all: $(TARGET)
+
+$(TARGET): $(SRCS)
+	$(CC) $(CFLAGS) $(SRCS) -o $@ $(LDFLAGS)
+	@echo.
+	@echo Build successful: $(TARGET)
+
+run: $(TARGET)
+	./$(TARGET)
+
+clean:
+	del /Q $(TARGET) $(FLASH) 2>nul || true

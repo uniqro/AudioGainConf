@@ -448,6 +448,48 @@ int AudioCmdHandleSetGainBlock(int client_fd, uint8_t *msg)
 }
 
 /**
+ * @brief Apply all stored configuration from flash to DSP via SPI.
+ *
+ * Called once at system startup to restore the last saved configuration
+ * to the DSP hardware. Skips silently if flash is empty or CRC fails.
+ */
+void AudioApplyAllFromFlash(void)
+{
+    AudioConfigFileData config_data;
+    uint32_t crc_computed;
+    int result;
+    int mode;
+    int i;
+
+    result = audio_flash_read_config((uint8_t *)&config_data, AUDIO_CFG_FILE_SIZE);
+    if (result != OK) {
+        logMsg("AudioConfigHandler: startup apply - flash read failed, skipping\n", 0, 0, 0, 0, 0);
+        return;
+    }
+
+    /* Verify CRC before dispatching to DSP */
+    crc_computed = AudioCfgCrc32Calculate((const uint8_t *)&config_data, AUDIO_CFG_CRC32_COVERED_SIZE);
+    if (crc_computed != config_data.crc32) {
+        logMsg("AudioConfigHandler: startup apply - CRC mismatch (stored=0x%08X computed=0x%08X), skipping\n",
+               (int)config_data.crc32, (int)crc_computed, 0, 0, 0);
+        return;
+    }
+
+    logMsg("AudioConfigHandler: startup apply - CRC OK, applying %d modes to DSP\n",
+           AUDIO_MODE_CNT, 0, 0, 0, 0);
+
+    for (mode = 0; mode < AUDIO_MODE_CNT; mode++) {
+        for (i = 0; i < AUDIO_GAIN_BLOCK_SIZE; i++) {
+            dispatch_spi_command((uint8_t)i, (uint8_t)mode,
+                                 ((uint8_t *)&config_data.sets[mode])[i]);
+        }
+    }
+
+    logMsg("AudioConfigHandler: startup apply - done (%d params dispatched)\n",
+           AUDIO_MODE_CNT * AUDIO_GAIN_BLOCK_SIZE, 0, 0, 0, 0);
+}
+
+/**
  * @brief Handle SET_META command - persist header_id and version to flash.
  */
 int AudioCmdHandleSetMeta(int client_fd, uint8_t *msg)

@@ -246,4 +246,14 @@ int AudioCmdHandleVerify(int client_fd, uint8_t *msg);
  */
 int AudioCmdHandleSetMeta(int client_fd, uint8_t *msg);
 
+/**
+ * @brief Apply all stored configuration from flash to DSP via SPI.
+ *
+ * Reads the full AudioConfigFileData from flash, verifies CRC32, and
+ * dispatches all 6 × 15 = 90 SPI commands to restore DSP state.
+ * Called once at system startup before accepting TCP connections.
+ * Skips silently if flash is empty or CRC does not match.
+ */
+void AudioApplyAllFromFlash(void);
+
 #endif /* AUDIOCONFIGHANDLER_H */

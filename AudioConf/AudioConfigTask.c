@@ -21,6 +21,7 @@
 #define ALLOCATE_AUDIOCONFIGTASK_EXP_H
 #include "AudioConfigTask.h"
 #include "AudioParamDef.h"
+#include "AudioConf/AudioConfigHandler.h"
 
 /* Global state definitions */
 volatile AudioConfigTaskState AudioConfigState = AC_STATE_INIT;
@@ -235,7 +236,10 @@ void AudioConfigTask(void)
     
     /* Initialize state */
     AudioConfigTaskInit();
-    
+
+    /* Restore last saved configuration from flash to DSP on startup */
+    AudioApplyAllFromFlash();
+
     /* Main task loop (infinite) */
     while (1)
     {

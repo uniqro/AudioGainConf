@@ -1,3 +1,6 @@
+# CMake build output
+build/
+
 # Compiled binaries
 a.exe
 audio_dsp_server.exe

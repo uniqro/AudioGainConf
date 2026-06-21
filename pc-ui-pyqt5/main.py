@@ -14,18 +14,7 @@ Key architecture:
 import sys
 import os
 import tempfile
-import io
 from collections import deque
-
-# Capture stdout/stderr to a log file so [DBG] prints are visible from windowed EXE.
-try:
-    _base = os.path.dirname(sys.executable if getattr(sys, "frozen", False)
-                            else os.path.abspath(__file__))
-    _log = open(os.path.join(_base, "audio_debug.log"), "w", encoding="utf-8", buffering=1)
-    sys.stdout = _log
-    sys.stderr = _log
-except Exception:
-    pass
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QScrollArea, QLabel, QMessageBox, QShortcut, QFileDialog,

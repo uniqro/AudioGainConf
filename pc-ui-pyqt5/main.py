@@ -20,7 +20,7 @@ from PyQt5.QtWidgets import (
     QSplitter, QScrollArea, QLabel, QMessageBox, QShortcut, QFileDialog,
 )
 from PyQt5.QtCore import Qt, QTimer, QSettings
-from PyQt5.QtGui import QKeySequence
+from PyQt5.QtGui import QKeySequence, QIcon
 
 from tcp_client import TCPClient
 from audio_protocol import (
@@ -275,8 +275,6 @@ class AudioDSPConfigApp(QMainWindow):
         """Send the next queued command if the pipeline is idle."""
         if self._pending_cmds and not self._cmd_queue:
             cmd_bytes, rtype = self._pending_cmds.popleft()
-            print(f"[DBG] SEND {rtype} cmd=0x{cmd_bytes[0]:02X} len={len(cmd_bytes)}"
-                  f"  queue_before={list(self._cmd_queue)}  pending_left={len(self._pending_cmds)}", flush=True)
             self._enqueue_and_send(cmd_bytes, rtype)
 
     def _send_status_request(self):
@@ -332,8 +330,6 @@ class AudioDSPConfigApp(QMainWindow):
     def _on_data_received(self, data: bytes):
         self._packets_received += 1
         self._update_packet_ui()
-        print(f"[DBG] RECV {len(data)} bytes  queue={list(self._cmd_queue)}  pending={len(self._pending_cmds)}", flush=True)
-
         # Guard against runaway buffer
         if len(self._response_buffer) + len(data) > _MAX_BUFFER_BYTES:
             self._response_buffer.clear()
@@ -593,6 +589,13 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Audio DSP Configuration")
     app.setOrganizationName(_SETTINGS_ORG)
+
+    _icon_path = os.path.join(
+        getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))),
+        "resources", "plane.png"
+    )
+    if os.path.exists(_icon_path):
+        app.setWindowIcon(QIcon(_icon_path))
 
     window = AudioDSPConfigApp()
     window.show()

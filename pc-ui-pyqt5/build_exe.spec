@@ -15,6 +15,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('resources/style.qss', 'resources'),
+        ('resources/plane.png', 'resources'),
     ],
     hiddenimports=[
         'PyQt5',
@@ -53,7 +54,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

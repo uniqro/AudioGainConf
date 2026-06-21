@@ -44,8 +44,8 @@
 /** TCP port for audio configuration (runtime commands only). */
 #define AUDIO_CONFIG_TCP_PORT       5558
 
-/** Maximum TCP message payload size (bytes). */
-#define AUDIO_CMD_MAX_PAYLOAD       64
+/** Maximum TCP message payload size (bytes). SET_META needs header_id(40)+version(30)=70. */
+#define AUDIO_CMD_MAX_PAYLOAD       70
 
 /** Response data buffer size (bytes). */
 /* Response data payload size - must accommodate STATUS response (6 modes × 15 params = 90 bytes) */
@@ -66,6 +66,7 @@ typedef enum {
     AUDIO_CMD_SET_PARAM = 0x02,     /**< Request: Set single parameter */
     AUDIO_CMD_SET_GAIN_BLOCK = 0x03,/**< Request: Set full gain block (all 15 params) */
     AUDIO_CMD_VERIFY = 0x04,        /**< Request: Verify CRC32 of stored config */
+    AUDIO_CMD_SET_META = 0x05,      /**< Request: Persist header_id + version to flash */
     AUDIO_CMD_RESPONSE = 0x80       /**< Response marker (OR'd with request type) */
 } AudioCommandType;
 
@@ -145,6 +146,16 @@ typedef struct {
     uint8_t gain_block[AUDIO_GAIN_BLOCK_SIZE];  /**< 15 gain values */
 } __attribute__((packed)) SetGainBlockPayload;
 
+/**
+ * @brief SET_META command payload structure.
+ * Carries header_id and version strings to persist in flash.
+ * Payload total: 40 + 30 = 70 bytes.
+ */
+typedef struct {
+    uint8_t header_id[AUDIO_CFG_HEADER_ID_SIZE]; /**< 40 bytes, null-padded ASCII */
+    uint8_t version[AUDIO_CFG_VERSION_SIZE];      /**< 30 bytes, null-padded ASCII */
+} __attribute__((packed)) SetMetaPayload;
+
 /* ========================================================================= */
 /* Handler Function Prototypes                                                */
 /* ========================================================================= */
@@ -160,8 +171,8 @@ typedef struct {
  * @return OK (0) on success, ERROR (-1) on failure
  *
  * Response data format:
- *   [mode0_param0..mode0_param14][mode1_param0..mode1_param14]...[mode5_param14]
- *   Total: 6 * 15 = 90 bytes
+ *   data[0..89]   = 6 * 15 = 90 bytes gain params
+ *   data[90..119] = version[30] stored in flash (null if never set via SET_META)
  */
 int AudioCmdHandleStatus(int client_fd, uint8_t *msg);
 
@@ -219,5 +230,20 @@ int AudioCmdHandleSetGainBlock(int client_fd, uint8_t *msg);
  *   match: 1 if CRCs match, 0 if mismatch
  */
 int AudioCmdHandleVerify(int client_fd, uint8_t *msg);
+
+/**
+ * @brief Handle SET_META command - persist header_id and version to flash.
+ *
+ * Reads current configuration from flash, replaces header_id and version
+ * fields, recalculates CRC32, and writes back.
+ *
+ * @param client_fd TCP client socket descriptor
+ * @param msg Received message buffer (AudioRequest with SetMetaPayload)
+ * @return OK (0) on success, ERROR (-1) on failure
+ *
+ * Request payload format:
+ *   [header_id:40][version:30]
+ */
+int AudioCmdHandleSetMeta(int client_fd, uint8_t *msg);
 
 #endif /* AUDIOCONFIGHANDLER_H */

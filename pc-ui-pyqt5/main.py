@@ -25,9 +25,10 @@ from PyQt5.QtGui import QKeySequence, QIcon
 from tcp_client import TCPClient
 from audio_protocol import (
     MODE_SETS, NUM_MODES, NUM_PARAMS,
-    CMD_STATUS, CMD_SET_GAIN_BLOCK, CMD_SET_PARAM, CMD_VERIFY,
+    CMD_STATUS, CMD_SET_GAIN_BLOCK, CMD_SET_PARAM, CMD_VERIFY, CMD_SET_META,
     build_status_request, build_set_param_request,
     build_set_gain_block_request, build_verify_request,
+    build_set_meta_request, parse_meta_from_status_response,
     parse_status_response, parse_all_modes_response,
     build_config_file, parse_config_file, parse_version_string,
     validate_params,
@@ -317,6 +318,9 @@ class AudioDSPConfigApp(QMainWindow):
                 self._enqueue_sequential(
                     build_set_gain_block_request(mode, values), "SET_GAIN_BLOCK"
                 )
+            self._enqueue_sequential(
+                build_set_meta_request(header_id_str, version_str), "SET_META"
+            )
             self._enqueue_sequential(build_verify_request(), "VERIFY")
 
             self.file_ops.set_status(f"Uploading: {os.path.basename(file_path)}…")
@@ -354,7 +358,7 @@ class AudioDSPConfigApp(QMainWindow):
                     self._start_watchdog()
                 self._fire_next_pending()
 
-        elif pending in ("SET_PARAM", "SET_GAIN_BLOCK"):
+        elif pending in ("SET_PARAM", "SET_GAIN_BLOCK", "SET_META"):
             if len(self._response_buffer) >= _RSP_SIZE:
                 buf = bytes(self._response_buffer[:_RSP_SIZE])
                 if buf[1] != 0:
@@ -395,6 +399,15 @@ class AudioDSPConfigApp(QMainWindow):
             self._set_status(
                 f"Read OK — {NUM_MODES} modes ({len(data)} B)", ok=True
             )
+            # Restore version/header metadata from flash if device has it
+            version_str = parse_meta_from_status_response(data)
+            if version_str and version_str.startswith('V'):
+                self.file_ops.set_version_preview(version_str)
+                try:
+                    _, major, minor, fix = parse_version_string(version_str.encode('ascii'))
+                    self.file_ops.set_version_parts(major, minor, fix)
+                except Exception:
+                    pass
             if self._export_after_download:
                 self._export_after_download = False
                 QTimer.singleShot(0, self._on_export)
@@ -418,16 +431,17 @@ class AudioDSPConfigApp(QMainWindow):
         mode = self.param_editor.get_current_mode_index()
         values = self.param_editor.get_all_params()
 
-        # Send SET_GAIN_BLOCK then VERIFY sequentially — VERIFY is held in
-        # _pending_cmds and fired only after the SET_GAIN_BLOCK response arrives.
-        self._enqueue_sequential(build_set_gain_block_request(mode, values), "SET_GAIN_BLOCK")
-        self._enqueue_sequential(build_verify_request(), "VERIFY")
-
         ma, mi, fx = self.file_ops.get_version_parts()
         ts = _dt.now()
         ver_preview = (f"V{ma:02d}.{mi:02d}.{fx:02d} "
                        f"{ts.day:02d}.{ts.month:02d}.{ts.year:04d} "
                        f"{ts.hour:02d}:{ts.minute:02d}:{ts.second:02d}")
+        header_id = self.file_ops.get_header_id()
+
+        self._enqueue_sequential(build_set_gain_block_request(mode, values), "SET_GAIN_BLOCK")
+        self._enqueue_sequential(build_set_meta_request(header_id, ver_preview), "SET_META")
+        self._enqueue_sequential(build_verify_request(), "VERIFY")
+
         self.file_ops.set_version_preview(ver_preview)
         self._set_status(f"Applying {MODE_SETS[mode]}…  {ver_preview}")
 
@@ -436,11 +450,20 @@ class AudioDSPConfigApp(QMainWindow):
         if not self.client.is_connected:
             self._set_status("Not connected", error=True)
             return
+        from datetime import datetime as _dt
         # get_all_mode_params() saves the currently visible tab before returning
         all_modes = self.param_editor.get_all_mode_params()
         for mode, values in enumerate(all_modes):
             self._enqueue_sequential(build_set_gain_block_request(mode, values), "SET_GAIN_BLOCK")
+        ma, mi, fx = self.file_ops.get_version_parts()
+        ts = _dt.now()
+        ver_preview = (f"V{ma:02d}.{mi:02d}.{fx:02d} "
+                       f"{ts.day:02d}.{ts.month:02d}.{ts.year:04d} "
+                       f"{ts.hour:02d}:{ts.minute:02d}:{ts.second:02d}")
+        header_id = self.file_ops.get_header_id()
+        self._enqueue_sequential(build_set_meta_request(header_id, ver_preview), "SET_META")
         self._enqueue_sequential(build_verify_request(), "VERIFY")
+        self.file_ops.set_version_preview(ver_preview)
         self.param_editor.clear_dirty()
         self._set_status(f"Applying all {NUM_MODES} modes…")
 

@@ -16,12 +16,14 @@ CMD_STATUS: int = 0x01
 CMD_SET_PARAM: int = 0x02
 CMD_SET_GAIN_BLOCK: int = 0x03
 CMD_VERIFY: int = 0x04
+CMD_SET_META: int = 0x05
 
 CMD_NAMES = {
     CMD_STATUS: "STATUS",
     CMD_SET_PARAM: "SET_PARAM",
     CMD_SET_GAIN_BLOCK: "SET_GAIN_BLOCK",
     CMD_VERIFY: "VERIFY",
+    CMD_SET_META: "SET_META",
 }
 
 # ─── Mode Sets ──────────────────────────────────────────────────
@@ -277,6 +279,36 @@ def build_set_gain_block_request(mode_index: int, values: List[int]) -> bytes:
     header = struct.pack("<BB", 0x03, mode_index)
     body = bytes(values[:15])  # Ensure exactly 15 bytes
     return header + body
+
+
+def build_set_meta_request(header_id: str, version_str: str) -> bytes:
+    """Build SET_META command (0x05).
+
+    Payload: [cmd:1][header_id:40][version:30] = 71 bytes total.
+    Both fields are null-padded to their fixed lengths.
+    """
+    hdr = header_id.encode('ascii')[:CFG_HEADER_ID_LEN]
+    hdr = hdr.ljust(CFG_HEADER_ID_LEN, b'\x00')
+    ver = version_str.encode('ascii')[:CFG_VERSION_LEN]
+    ver = ver.ljust(CFG_VERSION_LEN, b'\x00')
+    return bytes([CMD_SET_META]) + hdr + ver
+
+
+def parse_meta_from_status_response(data: bytes) -> str:
+    """Extract version string from STATUS response data.
+
+    STATUS response layout:
+      data[3..92]   = gains (6*15 = 90 bytes)
+      data[93..122] = version[30] stored in flash
+
+    Returns version string, or '' if not present / all-null.
+    """
+    meta_offset = 3 + NUM_MODES * NUM_PARAMS  # = 93
+    if len(data) < meta_offset + CFG_VERSION_LEN:
+        return ''
+    ver_raw = data[meta_offset: meta_offset + CFG_VERSION_LEN]
+    version_str = ver_raw.rstrip(b'\x00').decode('ascii', errors='replace')
+    return version_str
 
 
 def build_verify_request(mode_index: int = 0) -> bytes:

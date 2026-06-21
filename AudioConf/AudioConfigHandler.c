@@ -29,9 +29,9 @@
 #include "AudioConf/AudioFlashMgr.h"
 #include "AudioConf/AudioParamDef.h"
 
-/* Compile-time guard: STATUS response must fit in data[] without overflow */
+/* Compile-time guard: STATUS response (gains + version) must fit in data[] */
 typedef char _status_rsp_fits[
-    (AUDIO_MODE_CNT * AUDIO_GAIN_BLOCK_SIZE <= AUDIO_RSP_DATA_SIZE) ? 1 : -1];
+    (AUDIO_MODE_CNT * AUDIO_GAIN_BLOCK_SIZE + AUDIO_CFG_VERSION_SIZE <= AUDIO_RSP_DATA_SIZE) ? 1 : -1];
 #include "vxWorks.h"
 #include "logLib.h"
 #include "string.h"
@@ -252,17 +252,22 @@ int AudioCmdHandleStatus(int client_fd, uint8_t *msg)
     }
     
     /* Copy gain blocks for all 6 mode sets to response data */
-    /* Layout: [mode0_param0..mode0_param14][mode1_param0..]...[mode5_param14] */
+    /* data[0..89]: [mode0_param0..mode0_param14]...[mode5_param14] */
     for (i = 0; i < AUDIO_MODE_CNT; i++) {
         memcpy(&response.data[i * AUDIO_GAIN_BLOCK_SIZE],
                (const uint8_t *)&config_data.sets[i],
                AUDIO_GAIN_BLOCK_SIZE);
     }
-    
+
+    /* data[90..119]: version string stored in flash (null-padded, 30 bytes) */
+    memcpy(&response.data[AUDIO_MODE_CNT * AUDIO_GAIN_BLOCK_SIZE],
+           config_data.version,
+           AUDIO_CFG_VERSION_SIZE);
+
     response.status = AUDIO_STATUS_OK;
     response.error_code = 0;
-    
-    logMsg("AudioConfigHandler: STATUS - returned %d bytes for %d mode sets\n", 
+
+    logMsg("AudioConfigHandler: STATUS - returned %d bytes for %d mode sets\n",
            AUDIO_MODE_CNT * AUDIO_GAIN_BLOCK_SIZE, AUDIO_MODE_CNT, 0, 0, 0);
     
     return send_response(client_fd, &response);
@@ -439,6 +444,56 @@ int AudioCmdHandleSetGainBlock(int client_fd, uint8_t *msg)
     
     logMsg("AudioConfigHandler: SET_GAIN_BLOCK - mode=%d, 15 params OK\n", payload->mode_set, 0, 0, 0, 0);
     
+    return send_response(client_fd, &response);
+}
+
+/**
+ * @brief Handle SET_META command - persist header_id and version to flash.
+ */
+int AudioCmdHandleSetMeta(int client_fd, uint8_t *msg)
+{
+    AudioRequest *request = (AudioRequest *)msg;
+    AudioResponse response;
+    SetMetaPayload *payload;
+    AudioConfigFileData config_data;
+    int result;
+
+    memset(&response, 0, sizeof(AudioResponse));
+    response.cmd_type = AUDIO_CMD_SET_META | AUDIO_CMD_RESPONSE;
+
+    payload = (SetMetaPayload *)request->payload;
+
+    /* Read current configuration from flash */
+    result = audio_flash_read_config((uint8_t *)&config_data, AUDIO_CFG_FILE_SIZE);
+    if (result != OK) {
+        logMsg("AudioConfigHandler: SET_META - flash read failed\n");
+        response.status = AUDIO_STATUS_ERROR;
+        response.error_code = AUDIO_STATUS_FLASH_ERROR;
+        return send_response(client_fd, &response);
+    }
+
+    /* Update metadata fields */
+    memcpy(config_data.header_id, payload->header_id, AUDIO_CFG_HEADER_ID_SIZE);
+    memcpy(config_data.version,   payload->version,   AUDIO_CFG_VERSION_SIZE);
+
+    /* Recalculate CRC32 over the covered region */
+    config_data.crc32 = AudioCfgCrc32Calculate(
+        (const uint8_t *)&config_data, AUDIO_CFG_CRC32_COVERED_SIZE);
+
+    /* Write updated configuration back to flash */
+    result = audio_flash_write_config((uint8_t *)&config_data, AUDIO_CFG_FILE_SIZE);
+    if (result != OK) {
+        logMsg("AudioConfigHandler: SET_META - flash write failed\n");
+        response.status = AUDIO_STATUS_ERROR;
+        response.error_code = AUDIO_STATUS_FLASH_ERROR;
+        return send_response(client_fd, &response);
+    }
+
+    response.status = AUDIO_STATUS_OK;
+    response.error_code = 0;
+
+    logMsg("AudioConfigHandler: SET_META - header_id and version saved OK\n");
+
     return send_response(client_fd, &response);
 }
 

@@ -399,15 +399,18 @@ class AudioDSPConfigApp(QMainWindow):
             self._set_status(
                 f"Read OK — {NUM_MODES} modes ({len(data)} B)", ok=True
             )
-            # Restore version/header metadata from flash if device has it
+            # Restore version/header metadata from flash if device has it.
+            # set_version_parts must come BEFORE set_version_preview because
+            # set_version_parts triggers _refresh_version_preview which resets
+            # the preview to the placeholder "──" string.
             version_str = parse_meta_from_status_response(data)
             if version_str and version_str.startswith('V'):
-                self.file_ops.set_version_preview(version_str)
                 try:
                     _, major, minor, fix = parse_version_string(version_str.encode('ascii'))
                     self.file_ops.set_version_parts(major, minor, fix)
                 except Exception:
                     pass
+                self.file_ops.set_version_preview(version_str)
             if self._export_after_download:
                 self._export_after_download = False
                 QTimer.singleShot(0, self._on_export)

@@ -395,7 +395,7 @@ class AudioDSPConfigApp(QMainWindow):
             )
             if self._export_after_download:
                 self._export_after_download = False
-                self._on_export()
+                QTimer.singleShot(0, self._on_export)
         except Exception as e:
             self._export_after_download = False
             self._set_status(f"Parse error: {e}", error=True)

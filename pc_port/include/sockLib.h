@@ -23,8 +23,22 @@
 #ifndef _WIN32_WINNT
 #  define _WIN32_WINNT 0x0601   /* Windows 7+ */
 #endif
+
+/* When the project is built with /Zp1 (to honour __attribute__((packed)) on
+ * AudioConf structs), Windows SDK headers would otherwise be parsed under
+ * 1-byte packing, causing sizeof() mismatches in SDK-internal C_ASSERT checks
+ * (e.g. ws2ipdef.h:908 SOCKET_ADDRESS = 12 instead of 16).
+ * Push 8-byte packing (MSVC x64 default) before the SDK includes so that all
+ * Winsock2/WS2 struct definitions retain their natural layout; pop afterwards
+ * so that /Zp1 is in effect again for the AudioConf struct definitions. */
+#ifdef _MSC_VER
+#  pragma pack(push, 8)
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#ifdef _MSC_VER
+#  pragma pack(pop)
+#endif
 
 /* ── Windows socket wrappers (SOCKET → int, SOCKET_ERROR → -1/ERROR) ──────
  * These are defined BEFORE the #define macros so the winsock2 function name

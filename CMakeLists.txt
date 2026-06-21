@@ -51,6 +51,9 @@ set(VXWORKS_STUB "${CMAKE_SOURCE_DIR}/pc_port/include/vxWorks.h")
 if(MSVC)
     target_compile_options(audio_dsp_server PRIVATE
         /FI${VXWORKS_STUB}
+        /Zp1      # 1-byte struct packing — mirrors __attribute__((packed)) for
+                  # AudioConf structs (AudioConfigFileData must be exactly 300 B).
+                  # Winsock2 headers are protected by #pragma pack(push,8) in sockLib.h.
         /wd4005   # 'ERROR': macro redefined by wingdi.h; restored in sockLib.h
         /wd4047   # 'int' and pointer indirection levels differ
         /wd4028   # formal parameter type mismatch

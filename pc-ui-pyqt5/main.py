@@ -1,4 +1,4 @@
-"""
+﻿"""
 Audio DSP Configuration UI — Main Application
 PyQt5 desktop app for configuring Audio DSP parameters via TCP.
 
@@ -51,6 +51,7 @@ class AudioDSPConfigApp(QMainWindow):
         self._packets_received = 0
         self._mode_params      = [[0] * NUM_PARAMS for _ in range(NUM_MODES)]
         self._cmd_queue: deque = deque()          # FIFO of pending response types
+        self._pending_cmds: deque = deque()       # commands waiting to be sent sequentially
         self._response_buffer  = bytearray()
         self._setup_ui()
         self._setup_client()
@@ -157,11 +158,12 @@ class AudioDSPConfigApp(QMainWindow):
 
     def _cancel_watchdog(self):
         self._watchdog.stop()
-        if not self._cmd_queue:
+        if not self._cmd_queue and not self._pending_cmds:
             self.param_editor.set_busy(False)
 
     def _on_watchdog_timeout(self):
         self._cmd_queue.clear()
+        self._pending_cmds.clear()
         self._response_buffer.clear()
         self.param_editor.set_busy(False)
         self._set_status("Timeout: no response from device", error=True)
@@ -226,6 +228,7 @@ class AudioDSPConfigApp(QMainWindow):
         self.connection_panel.set_connection_state(False)
         self._cancel_watchdog()
         self._cmd_queue.clear()
+        self._pending_cmds.clear()
         self._response_buffer.clear()
         self._set_status("Disconnected")
 
@@ -235,17 +238,15 @@ class AudioDSPConfigApp(QMainWindow):
     def _on_reconnecting(self, attempt: int, delay_sec: int):
         self.connection_panel.set_reconnecting(attempt, delay_sec)
         self._set_status(
-            f"Reconnecting… attempt {attempt}, next in {delay_sec} s"
+            f"Reconnecting… attempt {attempt}/3, next in {delay_sec} s"
         )
 
     def _on_error(self, msg: str):
         self._cancel_watchdog()
         self._cmd_queue.clear()
+        self._pending_cmds.clear()
         self.connection_panel.set_connection_state(False)
         self._set_status(f"Error: {msg}", error=True)
-        # Show message box only for user-visible errors (not transient reconnects)
-        if "Connection" in msg or "Send" in msg:
-            QMessageBox.warning(self, "Connection Error", msg)
 
     # ── Protocol: send ────────────────────────────────────────────
 
@@ -259,6 +260,23 @@ class AudioDSPConfigApp(QMainWindow):
         self._cmd_queue.append(response_type)
         if was_empty:
             self._start_watchdog()
+
+    def _enqueue_sequential(self, cmd_bytes: bytes, response_type: str):
+        """Queue a command to be sent only after all prior responses are received.
+
+        Prevents the server from receiving multiple commands in one recv() call,
+        which would cause it to discard all but the first."""
+        self._pending_cmds.append((cmd_bytes, response_type))
+        if not self._cmd_queue:
+            self._fire_next_pending()
+
+    def _fire_next_pending(self):
+        """Send the next queued command if the pipeline is idle."""
+        if self._pending_cmds and not self._cmd_queue:
+            cmd_bytes, rtype = self._pending_cmds.popleft()
+            print(f"[DBG] SEND {rtype} cmd=0x{cmd_bytes[0]:02X} len={len(cmd_bytes)}"
+                  f"  queue_before={list(self._cmd_queue)}  pending_left={len(self._pending_cmds)}", flush=True)
+            self._enqueue_and_send(cmd_bytes, rtype)
 
     def _send_status_request(self):
         self._enqueue_and_send(build_status_request(), "STATUS")
@@ -305,6 +323,7 @@ class AudioDSPConfigApp(QMainWindow):
     def _on_data_received(self, data: bytes):
         self._packets_received += 1
         self._update_packet_ui()
+        print(f"[DBG] RECV {len(data)} bytes  queue={list(self._cmd_queue)}  pending={len(self._pending_cmds)}", flush=True)
 
         # Guard against runaway buffer
         if len(self._response_buffer) + len(data) > _MAX_BUFFER_BYTES:
@@ -328,6 +347,7 @@ class AudioDSPConfigApp(QMainWindow):
                 self._cancel_watchdog()
                 if self._cmd_queue:
                     self._start_watchdog()
+                self._fire_next_pending()
 
         elif pending in ("SET_PARAM", "SET_GAIN_BLOCK"):
             if len(self._response_buffer) >= 3:
@@ -341,6 +361,7 @@ class AudioDSPConfigApp(QMainWindow):
                 self._cancel_watchdog()
                 if self._cmd_queue:
                     self._start_watchdog()
+                self._fire_next_pending()
 
         elif pending == "VERIFY":
             if len(self._response_buffer) >= 12:
@@ -356,6 +377,7 @@ class AudioDSPConfigApp(QMainWindow):
                 self._cancel_watchdog()
                 if self._cmd_queue:
                     self._start_watchdog()
+                self._fire_next_pending()
         else:
             self._response_buffer.clear()
 
@@ -386,7 +408,12 @@ class AudioDSPConfigApp(QMainWindow):
             return
         from datetime import datetime as _dt
         mode = self.param_editor.get_current_mode_index()
-        self._send_set_gain_block(mode)
+        values = self.param_editor.get_all_params()
+
+        # Send SET_GAIN_BLOCK then VERIFY sequentially — VERIFY is held in
+        # _pending_cmds and fired only after the SET_GAIN_BLOCK response arrives.
+        self._enqueue_sequential(build_set_gain_block_request(mode, values), "SET_GAIN_BLOCK")
+        self._enqueue_sequential(build_verify_request(), "VERIFY")
 
         ma, mi, fx = self.file_ops.get_version_parts()
         ts = _dt.now()
@@ -396,24 +423,16 @@ class AudioDSPConfigApp(QMainWindow):
         self.file_ops.set_version_preview(ver_preview)
         self._set_status(f"Applying {MODE_SETS[mode]}…  {ver_preview}")
 
-        # Verify after a short pause to let SET_GAIN_BLOCK complete
-        QTimer.singleShot(200, self._send_verify)
-
     def _on_apply_all(self):
         """Apply all 6 mode parameter blocks to the device sequentially."""
         if not self.client.is_connected:
             self._set_status("Not connected", error=True)
             return
-        self._save_all_modes_to_internal()
-        for mode in range(NUM_MODES):
-            values = self._mode_params[mode]
-            data = build_set_gain_block_request(mode, values)
-            self.client.send(data)
-            self._packets_sent += 1
-            self._cmd_queue.append("SET_GAIN_BLOCK")
-        self._update_packet_ui()
-        self._start_watchdog()
-        QTimer.singleShot(200, self._send_verify)
+        # get_all_mode_params() saves the currently visible tab before returning
+        all_modes = self.param_editor.get_all_mode_params()
+        for mode, values in enumerate(all_modes):
+            self._enqueue_sequential(build_set_gain_block_request(mode, values), "SET_GAIN_BLOCK")
+        self._enqueue_sequential(build_verify_request(), "VERIFY")
         self.param_editor.clear_dirty()
         self._set_status(f"Applying all {NUM_MODES} modes…")
 
@@ -554,3 +573,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+

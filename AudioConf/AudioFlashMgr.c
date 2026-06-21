@@ -127,11 +127,13 @@ int audio_flash_verify_config(void)
         return ERROR;
     }
 
-    /* Extract stored CRC32 (at offset 141, big-endian on PowerPC) */
-    stored_crc32 = ((uint32_t)buffer[141] << 24)
-                 | ((uint32_t)buffer[142] << 16)
-                 | ((uint32_t)buffer[143] << 8)
-                 | (uint32_t)buffer[144];
+    /* Extract stored CRC32 (big-endian on PowerPC target).
+     * Field is at offset AUDIO_CFG_CRC32_COVERED_SIZE (161) in the struct:
+     *   header_id(40) + version(30) + set_count(1) + sets(6×15=90) = 161. */
+    stored_crc32 = ((uint32_t)buffer[AUDIO_CFG_CRC32_COVERED_SIZE + 0] << 24)
+                 | ((uint32_t)buffer[AUDIO_CFG_CRC32_COVERED_SIZE + 1] << 16)
+                 | ((uint32_t)buffer[AUDIO_CFG_CRC32_COVERED_SIZE + 2] << 8)
+                 | (uint32_t)buffer[AUDIO_CFG_CRC32_COVERED_SIZE + 3];
 
     /* Compute expected CRC32 over the covered region */
     computed_crc32 = _audio_flash_compute_crc32(buffer);

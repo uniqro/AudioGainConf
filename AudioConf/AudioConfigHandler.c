@@ -28,6 +28,10 @@
 #include "AudioConf/AudioSpiGateway.h"
 #include "AudioConf/AudioFlashMgr.h"
 #include "AudioConf/AudioParamDef.h"
+
+/* Compile-time guard: STATUS response must fit in data[] without overflow */
+typedef char _status_rsp_fits[
+    (AUDIO_MODE_CNT * AUDIO_GAIN_BLOCK_SIZE <= AUDIO_RSP_DATA_SIZE) ? 1 : -1];
 #include "vxWorks.h"
 #include "logLib.h"
 #include "string.h"
@@ -320,7 +324,11 @@ int AudioCmdHandleSetParam(int client_fd, uint8_t *msg)
     
     /* Update the specific parameter in the gain block */
     ((uint8_t *)&config_data.sets[payload->mode_set])[payload->param_offset] = payload->gain_value;
-    
+
+    /* Recalculate CRC32 over the covered region before writing */
+    config_data.crc32 = AudioCfgCrc32Calculate(
+        (const uint8_t *)&config_data, AUDIO_CFG_CRC32_COVERED_SIZE);
+
     /* Write updated configuration back to flash */
     result = audio_flash_write_config((uint8_t *)&config_data, AUDIO_CFG_FILE_SIZE);
     if (result != OK) {
@@ -401,7 +409,11 @@ int AudioCmdHandleSetGainBlock(int client_fd, uint8_t *msg)
     memcpy((uint8_t *)&config_data.sets[payload->mode_set],
            payload->gain_block,
            AUDIO_GAIN_BLOCK_SIZE);
-    
+
+    /* Recalculate CRC32 over the covered region before writing */
+    config_data.crc32 = AudioCfgCrc32Calculate(
+        (const uint8_t *)&config_data, AUDIO_CFG_CRC32_COVERED_SIZE);
+
     /* Write updated configuration back to flash */
     result = audio_flash_write_config((uint8_t *)&config_data, AUDIO_CFG_FILE_SIZE);
     if (result != OK) {

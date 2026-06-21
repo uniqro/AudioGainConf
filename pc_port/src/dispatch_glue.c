@@ -10,11 +10,17 @@
  * _pcport_fioRead_dispatch():
  *   1. Calls real recv (blocking, same semantics as original fioRead).
  *   2. If bytes received, dispatches to AudioCmdHandle*() → sends response.
- *   3. Cleans up the client slot (close + NULL fd) so the server can accept
- *      the next connection.  Without this cleanup the VxWorks state machine's
- *      AudioConfigFindFreeClient() quickly exhausts all MAX_CONNECTIONS slots.
- *   4. Returns the recv byte count so AudioConfigHandleClient's housekeeping
- *      (error detection, state transitions) still works correctly.
+ *   3. Returns the recv byte count (positive).
+ *
+ * Connection lifetime is managed by the VxWorks state machine:
+ *   - AudioConfigTask.c:AC_STATE_CONNECTED loop calls AudioConfigHandleClient
+ *     repeatedly as long as clientFd != NULL.  Each fioRead call here blocks
+ *     until the Python client sends the next command, so multiple commands can
+ *     be served over one TCP session without reconnecting.
+ *   - When Python closes the TCP connection, recv returns 0.  This function
+ *     returns 0, AudioConfigHandleClient detects the error and calls
+ *     AudioConfigCloseClient (closes fd, nulls slot), and the state machine
+ *     transitions to AC_STATE_LISTENING naturally.
  */
 
 #include "sockLib.h"
@@ -34,7 +40,6 @@
 int _pcport_fioRead_dispatch(int fd, char *buf, int n)
 {
     int     r;
-    int     i;
     uint8_t cmd;
 
     /* Real blocking recv — same semantics as original fioRead */
@@ -44,8 +49,19 @@ int _pcport_fioRead_dispatch(int fd, char *buf, int n)
 
     /* Dispatch the received command to the appropriate handler */
     cmd = (uint8_t)buf[0];
-    printf("[DISPATCH] fd=%d  cmd=0x%02X  len=%d\n", fd, cmd, r);
-    fflush(stdout);
+
+    /* Minimum frame sizes (cmd byte + payload):
+     *   STATUS / VERIFY : 1 byte  (cmd only)
+     *   SET_PARAM       : 4 bytes (cmd + mode + offset + value)
+     *   SET_GAIN_BLOCK  : 17 bytes (cmd + mode + 15 gain values) */
+    {
+        static const int min_len[5] = { 0, 1, 4, 17, 1 };
+        if (cmd >= 1 && cmd <= 4 && r < min_len[cmd]) {
+            logMsg("AudioConfig: short frame cmd=0x%02X len=%d (min=%d)\n",
+                   cmd, r, min_len[cmd], 0, 0, 0);
+            return r;
+        }
+    }
 
     switch (cmd) {
         case AUDIO_CMD_STATUS:
@@ -66,28 +82,5 @@ int _pcport_fioRead_dispatch(int fd, char *buf, int n)
             break;
     }
 
-    /*
-     * Close the client connection and free the slot.
-     *
-     * The VxWorks state machine in AudioConfigTask.c only frees client slots
-     * on ERROR (when fioRead returns 0/-1 after peer close).  But after we
-     * dispatch and send a response, AudioConfigHandleClient returns OK and
-     * the slot stays occupied with a stale fd.  AudioConfigFindFreeClient()
-     * would then fail after MAX_CONNECTIONS requests.
-     *
-     * Fix: close the fd and NULL the slot here, right after the response is
-     * sent.  AudioConfigHandleClient then sees clientFd == NULL and the state
-     * machine transitions correctly to AC_STATE_LISTENING.
-     */
-    close(fd);   /* _pcw_close() via sockLib.h macro on Windows */
-
-    for (i = 0; i < AUDIO_CONFIG_MAX_CONNECTIONS; i++) {
-        if (AudioConfigClients[i].clientFd == fd) {
-            AudioConfigClients[i].clientFd = 0;  /* NULL — slot is free */
-            AudioConfigClients[i].state    = AC_STATE_DISCONNECTED;
-            break;
-        }
-    }
-
-    return r;   /* return byte count to AudioConfigHandleClient */
+    return r;
 }

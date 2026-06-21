@@ -24,7 +24,7 @@
 
 /* Global state definitions */
 volatile AudioConfigTaskState AudioConfigState = AC_STATE_INIT;
-int AudioConfigServerSocket = NULL;
+int AudioConfigServerSocket = 0;
 AudioConfigClient AudioConfigClients[AUDIO_CONFIG_MAX_CONNECTIONS];
 
 /* ========================================================================= */
@@ -51,7 +51,7 @@ static STATUS AudioConfigInitClients(void)
     int i;
     for (i = 0; i < AUDIO_CONFIG_MAX_CONNECTIONS; i++)
     {
-        AudioConfigClients[i].clientFd = NULL;
+        AudioConfigClients[i].clientFd = 0;
         AudioConfigClients[i].state = AC_STATE_INIT;
         AudioConfigClients[i].clientAddrLen = 0;
     }
@@ -68,7 +68,7 @@ static int AudioConfigFindFreeClient(void)
     int i;
     for (i = 0; i < AUDIO_CONFIG_MAX_CONNECTIONS; i++)
     {
-        if (AudioConfigClients[i].clientFd == NULL)
+        if (AudioConfigClients[i].clientFd == 0)
         {
             return i;
         }
@@ -85,12 +85,12 @@ static void AudioConfigCloseClient(int clientIdx)
 {
     if ((clientIdx >= 0) && (clientIdx < AUDIO_CONFIG_MAX_CONNECTIONS))
     {
-        if (AudioConfigClients[clientIdx].clientFd != NULL)
+        if (AudioConfigClients[clientIdx].clientFd != 0)
         {
             logMsg("AudioConfig: Closing client %d, fd: %d\n", 
                    clientIdx, AudioConfigClients[clientIdx].clientFd, 0, 0, 0, 0);
             close(AudioConfigClients[clientIdx].clientFd);
-            AudioConfigClients[clientIdx].clientFd = NULL;
+            AudioConfigClients[clientIdx].clientFd = 0;
         }
         AudioConfigClients[clientIdx].state = AC_STATE_DISCONNECTED;
     }
@@ -104,7 +104,7 @@ static void AudioConfigCloseClient(int clientIdx)
 void AudioConfigTaskInit(void)
 {
     AudioConfigState = AC_STATE_INIT;
-    AudioConfigServerSocket = NULL;
+    AudioConfigServerSocket = 0;
     AudioConfigInitClients();
     logMsg("AudioConfig: Task initialized\n", 0, 0, 0, 0, 0, 0);
 }
@@ -182,14 +182,23 @@ STATUS AudioConfigHandleClient(int clientIdx)
     
     /* Process the received message */
     status = AudioConfigProcessMessage(clientIdx, recvBuffer, nRead);
-    
+
     if (status == ERROR)
     {
-        logMsg("AudioConfig: Process error from client %d\n", 
+        logMsg("AudioConfig: Process error from client %d\n",
                clientIdx, 0, 0, 0, 0, 0);
         AudioConfigCloseClient(clientIdx);
     }
-    
+    else
+    {
+        /* Restore slot state so the AC_STATE_CONNECTED loop finds this
+         * client again on the next iteration and waits for the next command.
+         * Without this reset the loop sees AC_STATE_RECEIVING, falls through
+         * to the "no active clients" check, and transitions back to
+         * AC_STATE_LISTENING — making every command after the first time out. */
+        AudioConfigClients[clientIdx].state = AC_STATE_CONNECTED;
+    }
+
     return status;
 }
 
@@ -234,7 +243,7 @@ void AudioConfigTask(void)
         {
             case AC_STATE_INIT:
                 /* Initialize server socket */
-                AudioConfigServerSocket = NULL;
+                AudioConfigServerSocket = 0;
                 sockAddrSize = sizeof(struct sockaddr_in);
                 
                 /* Zero out server address structure */
@@ -336,14 +345,14 @@ void AudioConfigTask(void)
                 /* Find active client and handle it */
                 for (clientIdx = 0; clientIdx < AUDIO_CONFIG_MAX_CONNECTIONS; clientIdx++)
                 {
-                    if ((AudioConfigClients[clientIdx].clientFd != NULL) &&
+                    if ((AudioConfigClients[clientIdx].clientFd != 0) &&
                         (AudioConfigClients[clientIdx].state == AC_STATE_CONNECTED))
                     {
                         /* Handle this client (blocking receive) */
                         AudioConfigHandleClient(clientIdx);
                         
                         /* After handling, return to listening for more connections */
-                        if (AudioConfigClients[clientIdx].clientFd == NULL)
+                        if (AudioConfigClients[clientIdx].clientFd == 0)
                         {
                             /* Client disconnected, continue listening */
                             AudioConfigState = AC_STATE_LISTENING;
@@ -384,10 +393,10 @@ void AudioConfigTask(void)
                 }
                 
                 /* Close server socket if open */
-                if (AudioConfigServerSocket != NULL)
+                if (AudioConfigServerSocket != 0)
                 {
                     close(AudioConfigServerSocket);
-                    AudioConfigServerSocket = NULL;
+                    AudioConfigServerSocket = 0;
                 }
                 
                 /* Delay before retry */

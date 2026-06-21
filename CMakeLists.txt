@@ -51,6 +51,9 @@ set(VXWORKS_STUB "${CMAKE_SOURCE_DIR}/pc_port/include/vxWorks.h")
 if(MSVC)
     target_compile_options(audio_dsp_server PRIVATE
         /FI${VXWORKS_STUB}
+        /Zp1      # 1-byte struct alignment (mirrors __attribute__((packed)))
+                  # Safe: Windows SDK headers use explicit #pragma pack(push/pop)
+        /wd4005   # 'ERROR': macro redefined by wingdi.h; restored in sockLib.h
         /wd4047   # 'int' and pointer indirection levels differ
         /wd4028   # formal parameter type mismatch
         /wd4100   # unreferenced formal parameter

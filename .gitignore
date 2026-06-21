@@ -17,5 +17,9 @@ build_test_stderr.txt
 # Object files
 *.o
 
+# IDE artifacts
+.vs/
+.vscode/
+
 # Claude local settings
 .claude/

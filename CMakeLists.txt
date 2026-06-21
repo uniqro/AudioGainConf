@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+﻿cmake_minimum_required(VERSION 3.20)
 project(AudioDspServer C)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -31,7 +31,7 @@ add_executable(audio_dsp_server ${AUDIO_SRCS} ${PORT_SRCS})
 # Include search path
 #
 # pc_port/include MUST come before the project root so that stub headers
-# shadow the VxWorks originals (e.g. <vxWorks.h> → our typedef shim).
+# shadow the VxWorks originals (e.g. <vxWorks.h> -> our typedef shim).
 # ─────────────────────────────────────────────────────────────────────────────
 target_include_directories(audio_dsp_server PRIVATE
     ${CMAKE_SOURCE_DIR}/pc_port/include
@@ -41,7 +41,7 @@ target_include_directories(audio_dsp_server PRIVATE
 # ─────────────────────────────────────────────────────────────────────────────
 # Force-include vxWorks.h into every translation unit
 #
-# Injects VxWorks type aliases (STATUS, UINT8 …) and logMsg without requiring
+# Injects VxWorks type aliases (STATUS, UINT8 ...) and logMsg without requiring
 # an explicit #include in the original source files.
 #   GCC/Clang : -include <file>
 #   MSVC       : /FI<file>
@@ -51,20 +51,21 @@ set(VXWORKS_STUB "${CMAKE_SOURCE_DIR}/pc_port/include/vxWorks.h")
 if(MSVC)
     target_compile_options(audio_dsp_server PRIVATE
         /FI${VXWORKS_STUB}
-        /Zp1      # 1-byte struct packing — mirrors __attribute__((packed)) for
-                  # AudioConf structs (AudioConfigFileData must be exactly 300 B).
-                  # Winsock2 headers are protected by #pragma pack(push,8) in sockLib.h.
-        /wd4005   # 'ERROR': macro redefined by wingdi.h; restored in sockLib.h
+        /Zp1      # 1-byte struct packing -- mirrors __attribute__((packed)) for AudioConf
+                  # structs (AudioConfigFileData must be exactly 300 B).
+                  # Windows SDK headers are pre-included in vxWorks.h (/FI) under
+                  # pack(push,8)/pop so their internal C_ASSERT checks see correct sizes.
+        /wd4005   # macro redefined (ERROR: wingdi.h -> 0; restored in vxWorks.h)
         /wd4047   # 'int' and pointer indirection levels differ
         /wd4028   # formal parameter type mismatch
         /wd4100   # unreferenced formal parameter
         /wd4311   # pointer truncation to 'int'
         /wd4024   # different types for formal/actual parameter
-        /wd4133   # incompatible types — function pointer vs int
+        /wd4133   # incompatible types -- function pointer vs int
         /wd4090   # 'function' : different 'const' qualifiers
     )
 else()
-    # GCC / Clang — MinGW (Windows) or native (Linux)
+    # GCC / Clang -- MinGW (Windows) or native (Linux)
     target_compile_options(audio_dsp_server PRIVATE
         -include "${VXWORKS_STUB}"
         -Wno-int-conversion

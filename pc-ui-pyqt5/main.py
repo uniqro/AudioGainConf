@@ -303,11 +303,17 @@ class AudioDSPConfigApp(QMainWindow):
                 file_data = f.read()
 
             try:
-                mode_params, _, _ = parse_config_file(file_data)
+                mode_params, version_str, header_id_str = parse_config_file(file_data)
             except ValueError as e:
                 self.file_ops.set_status(f"File error: {e}", success=False)
                 self._set_status(f"Upload error: {e}", error=True)
                 return
+
+            # Sync UI header/version from file so export after download stays consistent
+            self.file_ops.set_header_id(header_id_str)
+            _, major, minor, fix = parse_version_string(version_str.encode("ascii"))
+            self.file_ops.set_version_parts(major, minor, fix)
+            self.file_ops.set_version_preview(version_str)
 
             for mode, values in enumerate(mode_params):
                 self._enqueue_sequential(
@@ -483,7 +489,24 @@ class AudioDSPConfigApp(QMainWindow):
             all_modes = self.param_editor.get_all_mode_params()
             header_id = self.file_ops.get_header_id()
             major, minor, fix = self.file_ops.get_version_parts()
-            data = build_config_file(all_modes, header_id, major, minor, fix)
+
+            # Preserve timestamp from version_preview if it was set by import/upload.
+            # version_preview contains "──" placeholders only when no file was loaded.
+            from datetime import datetime as _dt
+            ts = _dt.now()
+            preview_text = self.file_ops.get_version_preview()
+            if preview_text and '──' not in preview_text:
+                try:
+                    parts = preview_text.strip().split(' ')
+                    d = parts[1].split('.')   # DD.MM.YYYY
+                    t = parts[2].split(':')   # HH:MM:SS
+                    ts = _dt(int(d[2]), int(d[1]), int(d[0]),
+                             int(t[0]), int(t[1]), int(t[2]))
+                except (IndexError, ValueError):
+                    pass
+
+            data = build_config_file(all_modes, header_id, major, minor, fix,
+                                     timestamp=ts)
 
             # Atomic write: temp file → os.replace()
             dir_name = os.path.dirname(file_path) or "."
@@ -496,8 +519,6 @@ class AudioDSPConfigApp(QMainWindow):
 
             settings.setValue("last_export_dir", os.path.dirname(file_path))
 
-            from datetime import datetime as _dt
-            ts = _dt.now()
             ver_preview = (f"V{major:02d}.{minor:02d}.{fix:02d} "
                            f"{ts.day:02d}.{ts.month:02d}.{ts.year:04d} "
                            f"{ts.hour:02d}:{ts.minute:02d}:{ts.second:02d}")

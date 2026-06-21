@@ -189,6 +189,9 @@ class FileOps(QWidget):
     def get_version_parts(self):
         return self.spin_major.value(), self.spin_minor.value(), self.spin_fix.value()
 
+    def get_version_preview(self) -> str:
+        return self.version_preview.text()
+
     def set_header_id(self, s: str):
         self.header_edit.setText(s[:39])
 

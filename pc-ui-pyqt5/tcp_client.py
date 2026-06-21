@@ -1,11 +1,13 @@
-"""
+﻿"""
 TCP Client for Audio DSP Configuration.
 Non-blocking socket with:
  - OS-level TCP keep-alive to detect silent drops
  - getpeername() verification before emitting connected()
- - Exponential-backoff auto-reconnect (user disconnect cancels retries)
+ - 5-second connection timeout (no SYN-ACK within limit -> fail fast)
+ - Auto-reconnect only after a successful connection, max 3 attempts
 """
 
+import time
 import socket
 import select
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer
@@ -14,14 +16,16 @@ from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 _INITIAL_RETRY_DELAY_MS = 1_000   # 1 s
 _MAX_RETRY_DELAY_MS     = 30_000  # 30 s
 _POLL_INTERVAL_MS       = 50      # 50 ms poll
+_CONNECT_TIMEOUT_S      = 5.0     # give up waiting for SYN-ACK after 5 s
+_MAX_RETRIES            = 3       # reconnect attempts after a drop
 
 
 class TCPClient(QObject):
-    connected    = pyqtSignal()
-    disconnected = pyqtSignal()
+    connected     = pyqtSignal()
+    disconnected  = pyqtSignal()
     data_received = pyqtSignal(bytes)
-    error        = pyqtSignal(str)
-    reconnecting = pyqtSignal(int, int)   # (attempt_number, delay_seconds)
+    error         = pyqtSignal(str)
+    reconnecting  = pyqtSignal(int, int)   # (attempt_number, delay_seconds)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -30,10 +34,12 @@ class TCPClient(QObject):
 
         self._host = "192.168.1.100"
         self._port = 5558
-        self._is_connected  = False
-        self._connecting    = False   # SYN_SENT phase
-        self._user_stopped  = False   # True after explicit disconnect()
-        self._retry_count   = 0
+        self._is_connected   = False
+        self._connecting     = False   # SYN_SENT phase
+        self._connect_start  = 0.0    # monotonic time when _do_connect() was called
+        self._user_stopped   = False   # True after explicit disconnect()
+        self._ever_connected = False   # True once a connection has succeeded
+        self._retry_count    = 0
         self._retry_delay_ms = _INITIAL_RETRY_DELAY_MS
 
         # Poll timer: runs every 50 ms while socket exists
@@ -78,13 +84,14 @@ class TCPClient(QObject):
         if port:
             self._port = port
         self._user_stopped   = False
+        self._ever_connected = False
         self._retry_count    = 0
         self._retry_delay_ms = _INITIAL_RETRY_DELAY_MS
         self._retry.stop()
         return self._do_connect()
 
     def disconnect(self) -> bool:
-        """User-initiated disconnect — cancels auto-reconnect."""
+        """User-initiated disconnect -- cancels auto-reconnect."""
         self._user_stopped = True
         self._retry.stop()
         was_connected = self._is_connected or self._connecting
@@ -120,15 +127,16 @@ class TCPClient(QObject):
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setblocking(False)
-            # OS-level keep-alive so silent drops are detected
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             err = sock.connect_ex((self._host, self._port))
-            # WSAEWOULDBLOCK (10035 Win) or EINPROGRESS (115 Linux) → still connecting
+            # WSAEWOULDBLOCK (10035 Win) or EINPROGRESS (115 Linux) -> still connecting
             if err not in (0, 10035, 115):
                 sock.close()
                 raise OSError(err, f"connect_ex returned {err}")
-            self.socket     = sock
-            self._connecting = True
+            self.socket        = sock
+            self._connecting   = True
+            self._connect_start = time.monotonic()
             self._is_connected = False
             self._poll.start(_POLL_INTERVAL_MS)
             return True
@@ -147,6 +155,11 @@ class TCPClient(QObject):
     def _schedule_retry(self):
         if self._user_stopped:
             return
+        if not self._ever_connected:
+            return  # never had a working connection -- do not retry
+        if self._retry_count >= _MAX_RETRIES:
+            self.disconnected.emit()  # give up; UI shows Disconnected
+            return
         self._retry.start(self._retry_delay_ms)
         self._retry_delay_ms = min(self._retry_delay_ms * 2, _MAX_RETRY_DELAY_MS)
 
@@ -162,19 +175,24 @@ class TCPClient(QObject):
                 # Connected!
                 self._connecting     = False
                 self._is_connected   = True
-                self._retry_count    = 0
-                self._retry_delay_ms = _INITIAL_RETRY_DELAY_MS
+                self._ever_connected = True
                 self.connected.emit()
             except OSError:
-                # Check for definitive failure via select
-                _, writable, exceptional = select.select(
-                    [], [self.socket], [self.socket], 0
-                )
+                # Check for definitive OS-level failure first
+                _, _, exceptional = select.select([], [self.socket], [self.socket], 0)
                 if exceptional:
                     self._connecting = False
                     err_code = self.socket.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
                     self._disconnect_internal()
                     self.error.emit(f"Connection refused (err {err_code})")
+                    self._schedule_retry()
+                elif time.monotonic() - self._connect_start > _CONNECT_TIMEOUT_S:
+                    # No RST ever arrived but SYN-ACK took too long
+                    self._connecting = False
+                    self._disconnect_internal()
+                    self.error.emit(
+                        f"Connection timed out ({_CONNECT_TIMEOUT_S:.0f} s)"
+                    )
                     self._schedule_retry()
             return
 
@@ -215,6 +233,13 @@ class TCPClient(QObject):
         if self.buffer:
             data = bytes(self.buffer)
             self.buffer.clear()
+            # Reset retry state only when actual data arrives — confirming a
+            # stable connection. Resetting on getpeername() alone is wrong:
+            # getpeername() can briefly succeed even for connections that
+            # immediately fail (WinError 10057), causing _retry_count to reset
+            # to 0 on every attempt and the "attempt 1/3" loop to repeat forever.
+            self._retry_count    = 0
+            self._retry_delay_ms = _INITIAL_RETRY_DELAY_MS
             self.data_received.emit(data)
 
     def _disconnect_internal(self):

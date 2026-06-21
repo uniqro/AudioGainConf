@@ -14,7 +14,18 @@ Key architecture:
 import sys
 import os
 import tempfile
+import io
 from collections import deque
+
+# Capture stdout/stderr to a log file so [DBG] prints are visible from windowed EXE.
+try:
+    _base = os.path.dirname(sys.executable if getattr(sys, "frozen", False)
+                            else os.path.abspath(__file__))
+    _log = open(os.path.join(_base, "audio_debug.log"), "w", encoding="utf-8", buffering=1)
+    sys.stdout = _log
+    sys.stderr = _log
+except Exception:
+    pass
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QScrollArea, QLabel, QMessageBox, QShortcut, QFileDialog,
@@ -41,6 +52,7 @@ _SETTINGS_ORG    = "DSPConfig"
 _SETTINGS_APP    = "AudioDSP"
 _WATCHDOG_SEC    = 5
 _MAX_BUFFER_BYTES = 1024
+_RSP_SIZE        = 131   # sizeof(AudioResponse): 1 cmd_type + 1 status + 1 error_code + 128 data
 
 
 class AudioDSPConfigApp(QMainWindow):
@@ -340,9 +352,9 @@ class AudioDSPConfigApp(QMainWindow):
         pending = self._cmd_queue[0]
 
         if pending == "STATUS":
-            if len(self._response_buffer) >= 3 + NUM_MODES * NUM_PARAMS:
-                self._process_status_response(bytes(self._response_buffer))
-                self._response_buffer.clear()
+            if len(self._response_buffer) >= _RSP_SIZE:
+                self._process_status_response(bytes(self._response_buffer[:_RSP_SIZE]))
+                del self._response_buffer[:_RSP_SIZE]
                 self._cmd_queue.popleft()
                 self._cancel_watchdog()
                 if self._cmd_queue:
@@ -350,13 +362,13 @@ class AudioDSPConfigApp(QMainWindow):
                 self._fire_next_pending()
 
         elif pending in ("SET_PARAM", "SET_GAIN_BLOCK"):
-            if len(self._response_buffer) >= 3:
-                buf = bytes(self._response_buffer)
+            if len(self._response_buffer) >= _RSP_SIZE:
+                buf = bytes(self._response_buffer[:_RSP_SIZE])
                 if buf[1] != 0:
                     self._set_status(
                         f"{pending} error: code={buf[2]}", error=True
                     )
-                self._response_buffer.clear()
+                del self._response_buffer[:_RSP_SIZE]
                 self._cmd_queue.popleft()
                 self._cancel_watchdog()
                 if self._cmd_queue:
@@ -364,15 +376,15 @@ class AudioDSPConfigApp(QMainWindow):
                 self._fire_next_pending()
 
         elif pending == "VERIFY":
-            if len(self._response_buffer) >= 12:
-                buf = bytes(self._response_buffer)
-                # Header is [cmd|0x80][status][error], so data[8] = buf[11]
-                match = buf[11] if len(buf) > 11 else 0
+            if len(self._response_buffer) >= _RSP_SIZE:
+                buf = bytes(self._response_buffer[:_RSP_SIZE])
+                # data[8] = buf[11]: crc_match byte from AudioCmdHandleVerify
+                match = buf[11]
                 if buf[1] == 0 and match:
                     self._set_status("VERIFY: CRC32 OK ✓", ok=True)
                 else:
                     self._set_status("VERIFY: CRC32 MISMATCH", error=True)
-                self._response_buffer.clear()
+                del self._response_buffer[:_RSP_SIZE]
                 self._cmd_queue.popleft()
                 self._cancel_watchdog()
                 if self._cmd_queue:

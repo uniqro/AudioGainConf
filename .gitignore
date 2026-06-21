@@ -7,6 +7,7 @@ audio_dsp_server.exe
 
 # Runtime data
 audio_flash.bin
+pc-ui-pyqt5/param/
 
 # Temporary test output logs
 test_out*.txt

@@ -28,7 +28,6 @@ from audio_protocol import (
     CMD_STATUS, CMD_SET_GAIN_BLOCK, CMD_SET_PARAM, CMD_VERIFY,
     build_status_request, build_set_param_request,
     build_set_gain_block_request, build_verify_request,
-    build_upload_request, build_full_upload,
     parse_status_response, parse_all_modes_response,
     build_config_file, parse_config_file, parse_version_string,
     validate_params,
@@ -302,22 +301,24 @@ class AudioDSPConfigApp(QMainWindow):
             with open(file_path, "rb") as f:
                 file_data = f.read()
 
-            if len(file_data) >= NUM_MODES * NUM_PARAMS:
-                mode_data = file_data[:NUM_MODES * NUM_PARAMS]
-            elif len(file_data) == NUM_MODES * NUM_PARAMS:
-                mode_data = file_data
-            else:
-                self.file_ops.set_status(
-                    f"File too small: {len(file_data)} B", success=False
-                )
+            try:
+                mode_params, _, _ = parse_config_file(file_data)
+            except ValueError as e:
+                self.file_ops.set_status(f"File error: {e}", success=False)
+                self._set_status(f"Upload error: {e}", error=True)
                 return
 
-            self.client.send(build_upload_request(mode_data))
-            self._packets_sent += 1
-            self._update_packet_ui()
-            self.file_ops.set_status(f"Uploaded: {os.path.basename(file_path)}")
+            for mode, values in enumerate(mode_params):
+                self._enqueue_sequential(
+                    build_set_gain_block_request(mode, values), "SET_GAIN_BLOCK"
+                )
+            self._enqueue_sequential(build_verify_request(), "VERIFY")
+
+            self.file_ops.set_status(f"Uploading: {os.path.basename(file_path)}…")
+            self._set_status(f"Uploading {os.path.basename(file_path)}…")
         except Exception as e:
             self.file_ops.set_status(f"Upload failed: {e}", success=False)
+            self._set_status(f"Upload error: {e}", error=True)
 
     # ── Protocol: receive ─────────────────────────────────────────
 

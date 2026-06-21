@@ -26,12 +26,15 @@ VxWorks/MPC866 hedefli gömülü ses DSP yapılandırma sisteminin **PC'de test 
 | SET_GAIN_BLOCK — tek mod yazma (APPLY) | ✅ |
 | APPLY ALL MODES — 6 mod sıralı yazma | ✅ |
 | VERIFY — flash CRC32 doğrulama | ✅ |
+| SET_META — header/version kalıcı flash yazma | ✅ |
+| Startup apply — açılışta flash→DSP uygulama | ✅ |
 | Upload to Radio — .bin dosyasını cihaza yükle | ✅ |
 | Download from Radio — cihazdan indir + kaydet | ✅ |
 | Export Params — UI'dan .bin dosyasına kaydet | ✅ |
 | Import Params — .bin dosyasını UI'a yükle | ✅ |
 | READ FROM RADIO — parametreleri UI'a çek | ✅ |
 | Timestamp korunması (upload→download döngüsü) | ✅ |
+| Version/header cihazdan okunma (bağlantıda) | ✅ |
 
 ---
 
@@ -125,16 +128,18 @@ python main.py
 
 ```text
 Python → Sunucu:
-  STATUS       [0x01]                              1 byte
-  SET_PARAM    [0x02][mode][param_idx][value]      4 byte
-  SET_GAIN_BLOCK [0x03][mode][gain×15]            17 byte
-  VERIFY       [0x04]                              1 byte
+  STATUS         [0x01]                                    1 byte
+  SET_PARAM      [0x02][mode][param_idx][value]            4 byte
+  SET_GAIN_BLOCK [0x03][mode][gain×15]                    17 byte
+  VERIFY         [0x04]                                    1 byte
+  SET_META       [0x05][header_id:40][version:30]         71 byte
 
 Sunucu → Python (her komuta):
   [cmd|0x80][status(0=OK)][error_code][data[128]] = 131 byte
 
 STATUS yanıtı data alanı:
-  [0..89] = 6 mod × 15 param (90 byte gain verileri)
+  [0..89]   = 6 mod × 15 param (90 byte gain verileri)
+  [90..119] = version[30] flash'ta saklanan (SET_META ile yazılmış)
 
 VERIFY yanıtı data alanı:
   [0..3]  = stored_crc32
@@ -204,13 +209,14 @@ data = build_config_file(..., timestamp=ts)
 | - | ----- | ----- | ---- |
 | 1 | `AudioFlashMgr.c:130-134` | CRC offset yanlış: hardcoded 141, olması gereken 161 (`AUDIO_CFG_CRC32_COVERED_SIZE`) | MAJOR |
 | 2 | `AudioConfigTask.c:27` | `int` alana `NULL` atanıyor (C uyarısı) | MINOR |
-| 3 | `AudioConfigHandler.c` | Derleme-zamanı buffer boyut assertion eksik | MINOR |
 
 ---
 
 ## 9. Git Geçmişi
 
 ```text
+0314f28  feat: startup'ta flash okunarak DSP'ye uygulanıyor
+4c53870  feat: CMD_SET_META (0x05) — header/version kalıcı olarak flash'a yazılıyor
 f359ce9  fix: Export — upload/import'tan gelen timestamp korunur
 1d566bb  fix: Download from Radio — QTimer.singleShot ile dialog ertele
 72abc8f  feat: Download from Radio — parametreleri indir ve dosyaya kaydet

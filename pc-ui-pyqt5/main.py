@@ -53,6 +53,7 @@ class AudioDSPConfigApp(QMainWindow):
         self._cmd_queue: deque = deque()          # FIFO of pending response types
         self._pending_cmds: deque = deque()       # commands waiting to be sent sequentially
         self._response_buffer  = bytearray()
+        self._export_after_download = False       # set by _on_download, cleared after export
         self._setup_ui()
         self._setup_client()
         self._setup_watchdog()
@@ -387,13 +388,16 @@ class AudioDSPConfigApp(QMainWindow):
         try:
             modes = parse_all_modes_response(data)
             self._mode_params = modes
-            mode_idx = self.param_editor.get_current_mode_index()
             self.param_editor.set_all_mode_params(modes)   # clears dirty too
             self.param_editor.set_status(f"Received all {NUM_MODES} mode sets")
             self._set_status(
                 f"Read OK — {NUM_MODES} modes ({len(data)} B)", ok=True
             )
+            if self._export_after_download:
+                self._export_after_download = False
+                self._on_export()
         except Exception as e:
+            self._export_after_download = False
             self._set_status(f"Parse error: {e}", error=True)
 
     # ── UI action handlers ────────────────────────────────────────
@@ -450,10 +454,11 @@ class AudioDSPConfigApp(QMainWindow):
         self._send_upload(file_path)
 
     def _on_download(self):
-        self._set_status("Downloading all parameters…")
         if not self.client.is_connected:
             self._set_status("Not connected", error=True)
             return
+        self._export_after_download = True
+        self._set_status("Downloading parameters from device…")
         self._send_status_request()
 
     # ── File export ───────────────────────────────────────────────

@@ -1,21 +1,16 @@
 {
-    "version": 6,
+    "version": 3,
     "cmakeMinimumRequired": { "major": 3, "minor": 20, "patch": 0 },
 
     "configurePresets": [
         {
             "name": "msvc-debug",
             "displayName": "MSVC Debug (x64)",
-            "description": "Visual Studio / MSVC — Debug. Açmak için VS'de klasörü aç, preset seç.",
+            "description": "Visual Studio / MSVC — Debug",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug"
-            },
-            "condition": {
-                "type": "equals",
-                "lhs": "${hostSystemName}",
-                "rhs": "Windows"
             }
         },
         {
@@ -26,50 +21,24 @@
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
-            },
-            "condition": {
-                "type": "equals",
-                "lhs": "${hostSystemName}",
-                "rhs": "Windows"
             }
         },
         {
             "name": "mingw-debug",
             "displayName": "MinGW Debug (MSYS2)",
-            "description": "MinGW-w64 GCC, Debug — MSYS2 terminalinden çalıştır",
+            "description": "MinGW-w64 GCC, Debug — MSYS2 terminalinden",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_C_COMPILER": "gcc"
-            },
-            "condition": {
-                "type": "equals",
-                "lhs": "${hostSystemName}",
-                "rhs": "Windows"
-            }
-        },
-        {
-            "name": "linux-debug",
-            "displayName": "Linux GCC Debug",
-            "description": "Linux / GCC — Debug",
-            "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build/${presetName}",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
-            },
-            "condition": {
-                "type": "equals",
-                "lhs": "${hostSystemName}",
-                "rhs": "Linux"
             }
         }
     ],
 
     "buildPresets": [
-        { "name": "msvc-debug",   "configurePreset": "msvc-debug"   },
-        { "name": "msvc-release", "configurePreset": "msvc-release"  },
-        { "name": "mingw-debug",  "configurePreset": "mingw-debug"   },
-        { "name": "linux-debug",  "configurePreset": "linux-debug"   }
+        { "name": "msvc-debug",   "configurePreset": "msvc-debug"  },
+        { "name": "msvc-release", "configurePreset": "msvc-release" },
+        { "name": "mingw-debug",  "configurePreset": "mingw-debug"  }
     ]
 }

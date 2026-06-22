@@ -25,10 +25,11 @@ from PyQt5.QtGui import QKeySequence, QIcon
 from tcp_client import TCPClient
 from audio_protocol import (
     MODE_SETS, NUM_MODES, NUM_PARAMS,
-    CMD_STATUS, CMD_SET_GAIN_BLOCK, CMD_SET_PARAM, CMD_VERIFY, CMD_SET_META,
+    CMD_STATUS, CMD_SET_GAIN_BLOCK, CMD_SET_PARAM, CMD_VERIFY, CMD_SET_META, CMD_GET_META,
     build_status_request, build_set_param_request,
     build_set_gain_block_request, build_verify_request,
     build_set_meta_request, parse_meta_from_status_response,
+    build_get_meta_request, parse_get_meta_response,
     parse_status_response, parse_all_modes_response,
     build_config_file, parse_config_file, parse_version_string,
     validate_params,
@@ -224,7 +225,8 @@ class AudioDSPConfigApp(QMainWindow):
     def _on_client_connected(self):
         self.connection_panel.set_connection_state(True)
         self._set_status("Connected — reading parameters…", ok=True)
-        self._send_status_request()
+        self._enqueue_sequential(build_get_meta_request(), "GET_META")
+        self._enqueue_sequential(build_status_request(), "STATUS")
 
     def _on_client_disconnected(self):
         self.connection_panel.set_connection_state(False)
@@ -348,7 +350,18 @@ class AudioDSPConfigApp(QMainWindow):
 
         pending = self._cmd_queue[0]
 
-        if pending == "STATUS":
+        if pending == "GET_META":
+            if len(self._response_buffer) >= _RSP_SIZE:
+                buf = bytes(self._response_buffer[:_RSP_SIZE])
+                self._process_get_meta_response(buf)
+                del self._response_buffer[:_RSP_SIZE]
+                self._cmd_queue.popleft()
+                self._cancel_watchdog()
+                if self._cmd_queue:
+                    self._start_watchdog()
+                self._fire_next_pending()
+
+        elif pending == "STATUS":
             if len(self._response_buffer) >= _RSP_SIZE:
                 self._process_status_response(bytes(self._response_buffer[:_RSP_SIZE]))
                 del self._response_buffer[:_RSP_SIZE]
@@ -390,6 +403,18 @@ class AudioDSPConfigApp(QMainWindow):
         else:
             self._response_buffer.clear()
 
+    def _process_get_meta_response(self, data: bytes):
+        header_id_str, version_str = parse_get_meta_response(data)
+        if header_id_str:
+            self.file_ops.set_header_id(header_id_str)
+        if version_str and version_str.startswith('V'):
+            try:
+                _, major, minor, fix = parse_version_string(version_str.encode('ascii'))
+                self.file_ops.set_version_parts(major, minor, fix)
+            except Exception:
+                pass
+            self.file_ops.set_version_preview(version_str)
+
     def _process_status_response(self, data: bytes):
         try:
             modes = parse_all_modes_response(data)
@@ -424,7 +449,8 @@ class AudioDSPConfigApp(QMainWindow):
         if not self.client.is_connected:
             self._set_status("Not connected", error=True)
             return
-        self._send_status_request()
+        self._enqueue_sequential(build_get_meta_request(), "GET_META")
+        self._enqueue_sequential(build_status_request(), "STATUS")
 
     def _on_apply(self):
         if not self.client.is_connected:
@@ -487,7 +513,8 @@ class AudioDSPConfigApp(QMainWindow):
             return
         self._export_after_download = True
         self._set_status("Downloading parameters from device…")
-        self._send_status_request()
+        self._enqueue_sequential(build_get_meta_request(), "GET_META")
+        self._enqueue_sequential(build_status_request(), "STATUS")
 
     # ── File export ───────────────────────────────────────────────
 

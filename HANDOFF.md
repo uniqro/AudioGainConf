@@ -1,7 +1,7 @@
 # AudioDspConfig — Başka Bilgisayarda Devam Kılavuzu
 
 > **Dal:** `master`  
-> **Son commit:** `f359ce9` (+ build commit bekliyor)  
+> **Son commit:** `feat: CMD_GET_META (0x06) tamamlandı`  
 > **Tarih:** 2026-06-22
 
 ---
@@ -12,13 +12,13 @@ VxWorks/MPC866 hedefli gömülü ses DSP yapılandırma sisteminin **PC'de test 
 
 | Bileşen | Dil | Konum | Açıklama |
 | ------- | --- | ----- | -------- |
-| Gömülü sunucu (PC port) | C (MSVC/MinGW) | `AudioConf/` + `pc_port/` | TCP 5558, 4 komut işler |
+| Gömülü sunucu (PC port) | C (MSVC/MinGW) | `AudioConf/` + `pc_port/` | TCP 5558, 6 komut işler |
 | Python UI istemcisi | Python 3 + PyQt5 | `pc-ui-pyqt5/` | Parametreleri gönderir |
 | Derlenmiş EXE | PyInstaller | `dist/AudioDSPConfig.exe` | Konsol yok, uçak ikonu |
 
 ---
 
-## 2. Çalışan Özellikler (Tümü Test Edildi)
+## 2. Çalışan Özellikler
 
 | Özellik | Durum |
 | ------- | ----- |
@@ -34,7 +34,7 @@ VxWorks/MPC866 hedefli gömülü ses DSP yapılandırma sisteminin **PC'de test 
 | Import Params — .bin dosyasını UI'a yükle | ✅ |
 | READ FROM RADIO — parametreleri UI'a çek | ✅ |
 | Timestamp korunması (upload→download döngüsü) | ✅ |
-| Version/header cihazdan okunma (bağlantıda) | ✅ |
+| GET_META — bağlantıda header_id okunması | ✅ |
 
 ---
 
@@ -44,7 +44,7 @@ VxWorks/MPC866 hedefli gömülü ses DSP yapılandırma sisteminin **PC'de test 
 AudioDspConfig/
 ├── AudioConf/                    ← Orijinal gömülü C kodu
 │   ├── AudioConfigTask.h/c       ← TCP sunucu döngüsü (AC_STATE_* state machine)
-│   ├── AudioConfigHandler.h/c    ← 4 komut handler'ı + send_response()
+│   ├── AudioConfigHandler.h/c    ← Komut handler'ları + send_response()
 │   ├── AudioParamDef.h/c         ← Parametre tanımları
 │   ├── AudioFlashMgr.h/c         ← Flash okuma/yazma
 │   └── AudioSpiGateway.h/c       ← SPI gateway
@@ -89,9 +89,11 @@ AudioDspConfig/
 ### C Sunucu (MSVC — CMake)
 
 ```powershell
-cmake -B build -G "Visual Studio 17 2022"
-cmake --build build --config Release
-# Çıktı: build/Release/audio_dsp_server.exe
+# VS cmake yolu (Visual Studio 18 Community):
+$cmake = "C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+$vcvars = "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat"
+cmd /c "`"$vcvars`" && `"$cmake`" --build build\msvc-debug --config Debug"
+# Çıktı: build/msvc-debug/audio_dsp_server.exe
 ```
 
 ### C Sunucu (MinGW)
@@ -133,13 +135,18 @@ Python → Sunucu:
   SET_GAIN_BLOCK [0x03][mode][gain×15]                    17 byte
   VERIFY         [0x04]                                    1 byte
   SET_META       [0x05][header_id:40][version:30]         71 byte
+  GET_META       [0x06]                                    1 byte
 
 Sunucu → Python (her komuta):
   [cmd|0x80][status(0=OK)][error_code][data[128]] = 131 byte
 
 STATUS yanıtı data alanı:
   [0..89]   = 6 mod × 15 param (90 byte gain verileri)
-  [90..119] = version[30] flash'ta saklanan (SET_META ile yazılmış)
+  [90..119] = version[30] flash'ta saklanan
+
+GET_META yanıtı data alanı (planlanıyor):
+  [0..39]  = header_id[40]
+  [40..69] = version[30]
 
 VERIFY yanıtı data alanı:
   [0..3]  = stored_crc32
@@ -168,7 +175,7 @@ Toplam     : 300 byte
 ### Sıralı Komut Gönderimi (`main.py`)
 
 ```python
-# APPLY ALL MODES / Upload: komutlar yanıt beklemeden gönderilmez
+# APPLY ALL MODES / Upload / Download: komutlar yanıt beklemeden gönderilmez
 def _enqueue_sequential(self, cmd_bytes, response_type):
     self._pending_cmds.append((cmd_bytes, response_type))
     if not self._cmd_queue:
@@ -201,34 +208,49 @@ else:
 data = build_config_file(..., timestamp=ts)
 ```
 
----
+### set_version_parts / set_version_preview Sırası (ÖNEMLİ)
 
-## 8. Kalan Sorunlar
-
-| # | Dosya | Sorun | Önem |
-| - | ----- | ----- | ---- |
-| 1 | `AudioFlashMgr.c:130-134` | CRC offset yanlış: hardcoded 141, olması gereken 161 (`AUDIO_CFG_CRC32_COVERED_SIZE`) | MAJOR |
-| 2 | `AudioConfigTask.c:27` | `int` alana `NULL` atanıyor (C uyarısı) | MINOR |
-
----
-
-## 9. Git Geçmişi
-
-```text
-0314f28  feat: startup'ta flash okunarak DSP'ye uygulanıyor
-4c53870  feat: CMD_SET_META (0x05) — header/version kalıcı olarak flash'a yazılıyor
-f359ce9  fix: Export — upload/import'tan gelen timestamp korunur
-1d566bb  fix: Download from Radio — QTimer.singleShot ile dialog ertele
-72abc8f  feat: Download from Radio — parametreleri indir ve dosyaya kaydet
-a35c28f  fix: Upload to Radio — build_upload_request yerine sıralı SET_GAIN_BLOCK
-68c30ff  chore: pc-ui-pyqt5/param/ gitignore'a eklendi
-ceafb6e  fix: stdout redirect kaldırıldı — [DBG] çıktısı görünür
-0ffb422  fix: TCP_NODELAY + _RSP_SIZE=131 + console=True EXE
+```python
+# set_version_parts() → _refresh_version_preview() çağırır → timestamp'i siler!
+# DOĞRU SIRA: önce parts, sonra preview
+self.file_ops.set_version_parts(major, minor, fix)   # spinbox'ları set et
+self.file_ops.set_version_preview(version_str)        # timestamp'i geri yaz
 ```
 
 ---
 
-## 10. Yeni Bilgisayarda İlk Adımlar
+## 8. CMD_GET_META (0x06) — TAMAMLANDI
+
+Bağlantı kurulduğunda, Read From Radio ve Download sırasında cihazdan
+`header_id[40]` + `version[30]` okunur. STATUS'tan önce sıralı gönderilir.
+
+---
+
+## 9. Kalan Sorunlar
+
+| # | Dosya | Sorun | Önem |
+| - | ----- | ----- | ---- |
+| 1 | `AudioFlashMgr.c:130-134` | CRC offset yanlış: hardcoded 141, olması gereken 161 | MAJOR |
+| 2 | `AudioConfigTask.c:27` | `int` alana `NULL` atanıyor (C uyarısı) | MINOR |
+
+---
+
+## 10. Git Geçmişi
+
+```text
+de4acea  fix: Download from Radio — timestamp korunuyor, zaman güncellenmiyor
+abee029  docs: HANDOFF güncelleme
+0314f28  feat: startup'ta flash okunarak DSP'ye uygulanıyor
+4c53870  feat: CMD_SET_META (0x05) — header/version kalıcı olarak flash'a yazılıyor
+b0a6927  feat: ikonu güncelle, konsol kapat, HANDOFF yenile
+f359ce9  fix: Export — upload/import'tan gelen timestamp korunur
+1d566bb  fix: Download from Radio — QTimer.singleShot ile dialog ertele
+72abc8f  feat: Download from Radio — parametreleri indir ve dosyaya kaydet
+```
+
+---
+
+## 11. Yeni Bilgisayarda İlk Adımlar
 
 ```powershell
 # 1. Repo klon
@@ -238,14 +260,8 @@ cd AudioDspConfig
 # 2. Python bağımlılıkları
 pip install pyqt5 pyinstaller
 
-# 3. C sunucuyu derle
-gcc -Wall -I pc_port/include -I . \
-    AudioConf/AudioConf.c AudioConf/AudioConfigTask.c \
-    AudioConf/AudioConfigHandler.c AudioConf/AudioParamDef.c \
-    AudioConf/AudioSpiGateway.c AudioConf/AudioFlashMgr.c \
-    pc_port/src/dispatch_glue.c pc_port/src/flash_stubs.c \
-    pc_port/src/tasklib_stubs.c \
-    -o audio_dsp_server.exe -lws2_32 -lpthread
+# 3. C sunucuyu derle (MSVC)
+# VS cmake yolunu bul ve yukarıdaki build komutunu çalıştır
 
 # 4. EXE hazır: dist/AudioDSPConfig.exe
 # veya doğrudan çalıştır:

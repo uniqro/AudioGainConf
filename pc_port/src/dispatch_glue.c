@@ -56,8 +56,8 @@ int _pcport_fioRead_dispatch(int fd, char *buf, int n)
      *   SET_GAIN_BLOCK  : 17 bytes (cmd + mode + 15 gain values)
      *   SET_META        : 71 bytes (cmd + header_id[40] + version[30]) */
     {
-        static const int min_len[6] = { 0, 1, 4, 17, 1, 71 };
-        if (cmd >= 1 && cmd <= 5 && r < min_len[cmd]) {
+        static const int min_len[7] = { 0, 1, 4, 17, 1, 71, 1 };
+        if (cmd >= 1 && cmd <= 6 && r < min_len[cmd]) {
             logMsg("AudioConfig: short frame cmd=0x%02X len=%d (min=%d)\n",
                    cmd, r, min_len[cmd], 0, 0, 0);
             return r;
@@ -79,6 +79,9 @@ int _pcport_fioRead_dispatch(int fd, char *buf, int n)
             break;
         case AUDIO_CMD_SET_META:
             AudioCmdHandleSetMeta(fd, (uint8_t *)buf);
+            break;
+        case AUDIO_CMD_GET_META:
+            AudioCmdHandleGetMeta(fd, (uint8_t *)buf);
             break;
         default:
             logMsg("AudioConfig: Unknown cmd=0x%02X on fd=%d\n",

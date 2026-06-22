@@ -67,6 +67,7 @@ typedef enum {
     AUDIO_CMD_SET_GAIN_BLOCK = 0x03,/**< Request: Set full gain block (all 15 params) */
     AUDIO_CMD_VERIFY = 0x04,        /**< Request: Verify CRC32 of stored config */
     AUDIO_CMD_SET_META = 0x05,      /**< Request: Persist header_id + version to flash */
+    AUDIO_CMD_GET_META = 0x06,      /**< Request: Read header_id + version from flash */
     AUDIO_CMD_RESPONSE = 0x80       /**< Response marker (OR'd with request type) */
 } AudioCommandType;
 
@@ -245,6 +246,21 @@ int AudioCmdHandleVerify(int client_fd, uint8_t *msg);
  *   [header_id:40][version:30]
  */
 int AudioCmdHandleSetMeta(int client_fd, uint8_t *msg);
+
+/**
+ * @brief Handle GET_META command - read header_id and version from flash.
+ *
+ * Reads current configuration from flash and returns header_id and version.
+ *
+ * @param client_fd TCP client socket descriptor
+ * @param msg Received message buffer (AudioRequest, no payload)
+ * @return OK (0) on success, ERROR (-1) on failure
+ *
+ * Response data format:
+ *   data[0..39]  = header_id[40] stored in flash
+ *   data[40..69] = version[30]  stored in flash
+ */
+int AudioCmdHandleGetMeta(int client_fd, uint8_t *msg);
 
 /**
  * @brief Apply all stored configuration from flash to DSP via SPI.

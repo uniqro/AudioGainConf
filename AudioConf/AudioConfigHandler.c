@@ -540,6 +540,37 @@ int AudioCmdHandleSetMeta(int client_fd, uint8_t *msg)
 }
 
 /**
+ * @brief Handle GET_META command - read header_id and version from flash.
+ */
+int AudioCmdHandleGetMeta(int client_fd, uint8_t *msg)
+{
+    AudioResponse response;
+    AudioConfigFileData config_data;
+    int result;
+
+    memset(&response, 0, sizeof(AudioResponse));
+    response.cmd_type = AUDIO_CMD_GET_META | AUDIO_CMD_RESPONSE;
+
+    result = audio_flash_read_config((uint8_t *)&config_data, AUDIO_CFG_FILE_SIZE);
+    if (result != OK) {
+        logMsg("AudioConfigHandler: GET_META - flash read failed\n");
+        response.status = AUDIO_STATUS_ERROR;
+        response.error_code = AUDIO_STATUS_FLASH_ERROR;
+        return send_response(client_fd, &response);
+    }
+
+    /* data[0..39] = header_id, data[40..69] = version */
+    memcpy(&response.data[0],                       config_data.header_id, AUDIO_CFG_HEADER_ID_SIZE);
+    memcpy(&response.data[AUDIO_CFG_HEADER_ID_SIZE], config_data.version,   AUDIO_CFG_VERSION_SIZE);
+
+    response.status = AUDIO_STATUS_OK;
+
+    logMsg("AudioConfigHandler: GET_META - OK\n");
+
+    return send_response(client_fd, &response);
+}
+
+/**
  * @brief Handle VERIFY command - verify CRC32 of stored configuration.
  *
  * Reads configuration from flash, computes CRC32, and compares with

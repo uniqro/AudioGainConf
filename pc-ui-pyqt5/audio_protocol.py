@@ -17,6 +17,7 @@ CMD_SET_PARAM: int = 0x02
 CMD_SET_GAIN_BLOCK: int = 0x03
 CMD_VERIFY: int = 0x04
 CMD_SET_META: int = 0x05
+CMD_GET_META: int = 0x06
 
 CMD_NAMES = {
     CMD_STATUS: "STATUS",
@@ -24,6 +25,7 @@ CMD_NAMES = {
     CMD_SET_GAIN_BLOCK: "SET_GAIN_BLOCK",
     CMD_VERIFY: "VERIFY",
     CMD_SET_META: "SET_META",
+    CMD_GET_META: "GET_META",
 }
 
 # ─── Mode Sets ──────────────────────────────────────────────────
@@ -292,6 +294,25 @@ def build_set_meta_request(header_id: str, version_str: str) -> bytes:
     ver = version_str.encode('ascii')[:CFG_VERSION_LEN]
     ver = ver.ljust(CFG_VERSION_LEN, b'\x00')
     return bytes([CMD_SET_META]) + hdr + ver
+
+
+def build_get_meta_request() -> bytes:
+    """Build GET_META command request (0x06)."""
+    return bytes([CMD_GET_META])
+
+
+def parse_get_meta_response(data: bytes) -> tuple:
+    """Parse GET_META response. Returns (header_id_str, version_str).
+
+    Response layout:
+      data[3..42]  = header_id[40]
+      data[43..72] = version[30]
+    """
+    if len(data) < 3 + CFG_HEADER_ID_LEN + CFG_VERSION_LEN or data[1] != 0:
+        return ('', '')
+    hdr = data[3: 3 + CFG_HEADER_ID_LEN].rstrip(b'\x00').decode('ascii', errors='replace')
+    ver = data[3 + CFG_HEADER_ID_LEN: 3 + CFG_HEADER_ID_LEN + CFG_VERSION_LEN].rstrip(b'\x00').decode('ascii', errors='replace')
+    return (hdr, ver)
 
 
 def parse_meta_from_status_response(data: bytes) -> str:
